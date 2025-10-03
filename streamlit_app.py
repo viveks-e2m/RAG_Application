@@ -88,7 +88,7 @@ def upload_document(file) -> Optional[Dict[str, Any]]:
         return None
 
 
-def query_documents(query: str, top_k: int = 5) -> Optional[Dict[str, Any]]:
+def query_documents(query: str, top_k: int = 10) -> Optional[Dict[str, Any]]:
     """Query documents in the RAG system and generate response"""
     if st.session_state.api_status != "connected":
         if not check_api_status():
@@ -116,11 +116,67 @@ def query_documents(query: str, top_k: int = 5) -> Optional[Dict[str, Any]]:
         st.error(f"Error querying documents: {str(e)}")
         return None
 
+
+def format_document_preview(content: str, max_length: int = 300) -> str:
+    """Format document content for preview display"""
+    if len(content) <= max_length:
+        return content
+    return content[:max_length] + "..."
+
+
+def display_document_results(documents: List[Dict[str, Any]], expanded: bool = False):
+    """Display document results in a structured format"""
+    st.markdown("### 📚 Retrieved Documents")
+    
+    # Show summary statistics
+    st.markdown(f"**Found {len(documents)} relevant document{'s' if len(documents) != 1 else ''}**")
+    
+    # Create tabs for better organization if there are multiple documents
+    if len(documents) > 1:
+        tabs = st.tabs([f"Document {i+1}" for i in range(len(documents))])
+        for i, (tab, doc) in enumerate(zip(tabs, documents)):
+            with tab:
+                display_single_document(doc, i+1, expanded)
+    else:
+        # Single document view
+        for i, doc in enumerate(documents):
+            display_single_document(doc, i+1, expanded)
+
+
+def display_single_document(doc: Dict[str, Any], index: int, expanded: bool = False):
+    """Display a single document in a structured format"""
+    # Document header with score
+    score_percentage = min(100, max(0, int(doc['score'] * 100)))
+    st.markdown(f"**📄 Document:** `{doc['document_name']}`")
+    st.progress(score_percentage/100, text=f"Relevance Score: {doc['score']:.4f} ({score_percentage}%)")
+    
+    # Document content
+    with st.expander("📄 **Document Content**", expanded=expanded):
+        # Format content for better readability
+        content = doc['text']
+        if len(content) > 500:
+            # For longer content, show a preview with option to expand
+            st.markdown("**Preview:**")
+            st.markdown(format_document_preview(content, 500))
+            st.markdown("---")
+            st.markdown("**Full Content:**")
+            st.markdown(content)
+        else:
+            st.markdown(content)
+    
+    # Document metadata
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown(f"**Chunk Index:** {doc['chunk_index']}")
+    with col2:
+        st.markdown(f"**Characters:** {len(doc['text'])}")
+
+
 def main():
     st.set_page_config(page_title="RAG Chat Interface", page_icon="💬", layout="wide")
 
     st.title("💬 RAG Chat Interface")
-    st.caption("🚀 Interface for your document search system")
+    st.caption("🚀 Intelligent document search with AI-powered responses")
 
     # Check API status on app start or refresh
     if st.session_state.api_status == "unknown":
@@ -128,10 +184,10 @@ def main():
 
     # Sidebar for document upload
     with st.sidebar:
-        st.header("Document Management")
+        st.header("📁 Document Management")
 
         # Display API status with more details
-        st.subheader("API Status")
+        st.subheader("📡 API Status")
         if st.session_state.api_status == "connected":
             st.success("✅ Connected to API")
             st.caption(f"Endpoint: {API_BASE_URL}")
@@ -150,7 +206,7 @@ def main():
         st.divider()
 
         # Updated file uploader to support multiple document formats
-        st.subheader("Upload Documents")
+        st.subheader("📤 Upload Documents")
         st.caption("Supported formats: TXT, PDF, DOCX, PPTX, HTML")
         uploaded_file = st.file_uploader(
             "Choose a file", 
@@ -172,7 +228,7 @@ def main():
 
         st.divider()
 
-        st.subheader("Setup Instructions")
+        st.subheader("⚙️ Setup Instructions")
         if IS_DOCKER:
             st.info("Running in Docker mode")
             st.markdown(
@@ -202,15 +258,18 @@ def main():
     # Display chat messages
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-            # If it's an assistant message with results, display them
-            if "results" in message:
-                st.markdown("---")
-                st.markdown("**Retrieved Documents:**")
-                for i, result in enumerate(message["results"], 1):
-                    with st.expander(f"Document {i} (Score: {result['score']:.4f})"):
-                        st.markdown(f"**File:** {result['document_name']}")
-                        st.markdown(f"**Content:** {result['text']}")
+            if message["role"] == "assistant":
+                # For assistant messages, display the response and documents separately
+                st.markdown("### 🤖 AI Response")
+                st.markdown(message["content"])
+                
+                # Display retrieved documents if available
+                if "results" in message and message["results"]:
+                    st.markdown("---")
+                    display_document_results(message["results"])
+            else:
+                # For user messages, display normally
+                st.markdown(message["content"])
 
     # Chat input
     if prompt := st.chat_input("Ask a question about your documents..."):
@@ -223,24 +282,19 @@ def main():
 
         # Get response from API
         with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
+            with st.spinner("🧠 Thinking..."):
                 # Use the query_documents endpoint for both retrieval and response generation
                 response = query_documents(prompt)
 
                 if response:
-                    # Display the generated response
+                    # Display the generated response in a structured format
+                    st.markdown("### 🤖 AI Response")
                     st.markdown(response["response"])
 
-                    # Display retrieved documents in an expander
+                    # Display retrieved documents in a structured format
                     if response["retrieved_documents"]:
                         st.markdown("---")
-                        st.markdown("**Retrieved Documents:**")
-                        for i, result in enumerate(response["retrieved_documents"], 1):
-                            with st.expander(
-                                f"Document {i} (Score: {result['score']:.4f})"
-                            ):
-                                st.markdown(f"**File:** {result['document_name']}")
-                                st.markdown(f"**Content:** {result['text']}")
+                        display_document_results(response["retrieved_documents"])
 
                     # Add assistant response to chat history
                     st.session_state.messages.append(

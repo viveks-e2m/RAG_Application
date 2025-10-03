@@ -63,7 +63,7 @@ class QdrantService:
 
         return self.client.upsert(collection_name=self.collection_name, points=points)
 
-    def search_points(self, query_vector, limit=5):
+    def search_points(self, query_vector, limit=10):
         """Search points in Qdrant collection"""
         if not self.client:
             raise Exception("Qdrant client not initialized")

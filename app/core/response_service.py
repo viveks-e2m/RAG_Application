@@ -52,18 +52,18 @@ class ResponseService:
             # Create the prompt
             prompt = self._create_prompt(query, context)
 
-            # Generate response using OpenAI
+            # Generate response using OpenAI with increased token limit for longer responses
             response = self.client.chat.completions.create(
                 model=model,
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a helpful assistant that answers questions based on provided context. Always be accurate and concise.",
+                        "content": "You are an expert research assistant that provides comprehensive, detailed, and well-structured answers. Your responses should be thorough, informative, and educational. Always prioritize accuracy and clarity. Structure your responses with clear headings, subheadings, bullet points, and numbered lists where appropriate. Include specific examples, quotes, and references from the provided context. Aim for responses that are 3-5 paragraphs long for complex questions, ensuring you fully address all aspects of the query.",
                     },
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.7,
-                max_tokens=500,
+                max_tokens=1500,  # Increased from 1000 to 1500 for even more detailed responses
             )
 
             generated_response = response.choices[0].message.content
@@ -116,18 +116,32 @@ class ResponseService:
             str: Complete prompt for the model
         """
         prompt = f"""
-Answer the question based only on the following context:
+Answer the question comprehensively based only on the following context:
 
 {context}
 
 Question: {query}
 
-Instructions:
-1. Use only the information from the provided context
-2. If the context doesn't contain enough information, say so
-3. Provide a clear, concise, and well-structured answer
-4. If relevant, mention the source documents
-5. Do not make up information not present in the context
+Instructions for providing a detailed response:
+1. Use ONLY the information from the provided context - do not make up information
+2. If the context doesn't contain enough information to fully answer, clearly state what is missing
+3. Provide a comprehensive and detailed answer with thorough explanation
+4. Structure your response with clear headings, subheadings, bullet points, and numbered lists where appropriate
+5. Include specific details, examples, direct quotes, and references from the context when relevant
+6. If relevant, mention the source documents and their relevance to your answer
+7. Aim for a response of at least 4-6 substantial paragraphs for complex questions
+8. Use a professional, educational, and helpful tone
+9. Organize information logically with proper flow between ideas
+10. Highlight key points and important concepts
+11. Address all aspects of the question thoroughly
+12. Conclude with a summary of the main points if appropriate
+
+Format your response with:
+- A clear introduction that addresses the main question
+- Well-organized body paragraphs with supporting details
+- Bullet points or numbered lists for enumerating items or steps
+- Direct quotes from the context when they add value
+- A conclusion that summarizes key findings
 
 Answer:
 """
@@ -150,12 +164,13 @@ Answer:
 
         response = "Here's what I found in the documents:\n\n"
         for i, doc in enumerate(retrieved_documents, 1):
-            content = (
-                doc.get("text", "")[:200] + "..."
-                if len(doc.get("text", "")) > 200
-                else doc.get("text", "")
-            )
+            content = doc.get("text", "")
             source = doc.get("document_name", "Unknown")
-            response += f"{i}. From {source}: {content}\n\n"
+            score = doc.get("score", 0)
+            
+            # Provide more detailed information in the fallback response
+            response += f"Document {i} (Source: {source}, Relevance Score: {score:.4f}):\n"
+            response += f"Content: {content}\n\n"
 
+        response += "Please note: This is a fallback response. The AI-generated response would provide a more structured and detailed answer based on this information."
         return response
