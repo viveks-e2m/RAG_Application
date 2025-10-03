@@ -1,6 +1,12 @@
-from openai import OpenAI
-from app.core.config import settings
 import logging
+
+from langchain_docling import DoclingLoader
+from docling.chunking import HierarchicalChunker
+from langchain_docling.loader import ExportType
+from openai import OpenAI
+
+from app.core.config import settings
+
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +93,33 @@ class EmbeddingService:
 
         return final_chunks
 
+    def chunk_text_with_docling(self, file_path):
+        """
+        Split text into chunks using Docling's HierarchicalChunker.
+        This method is specifically for document files (PDF, DOCX, etc.).
+        """
+
+        try:
+            # Initialize Docling loader with HierarchicalChunker
+            loader = DoclingLoader(
+                file_path=file_path,
+                export_type=ExportType.DOC_CHUNKS,
+                chunker=HierarchicalChunker(),
+            )
+
+            # Load documents
+            docs = loader.load()
+
+            # Extract text content from documents
+            chunks = [doc.page_content for doc in docs if doc.page_content.strip()]
+
+            logger.info(f"Docling chunking completed. Generated {len(chunks)} chunks.")
+            return chunks
+
+        except Exception as e:
+            logger.error(f"Error during Docling chunking: {e}")
+            raise
+
     def chunk_text(self, text, max_chunk_size=5000):
         """
         Split text into chunks of specified maximum size.
@@ -137,5 +170,90 @@ class EmbeddingService:
                 current_pos = end_pos
 
             chunks.append(chunk)
+
+        return chunks
+
+    def process_document_content(self, content, file_extension):
+        """
+        Process document content and return chunks.
+        This method handles the appropriate chunking strategy based on file type.
+
+        Args:
+            content (bytes or str): Document content
+            file_extension (str): File extension (e.g., '.pdf', '.txt')
+
+        Returns:
+            list: List of text chunks
+        """
+        # Use Docling for chunking if it's a document file, otherwise use text chunking
+        if file_extension in [".pdf", ".docx", ".pptx", ".html"]:
+            # For document files, we need to save to a temporary file first
+            # This method is meant for text content processing
+            raise ValueError(
+                f"File extension {file_extension} requires file-based processing. "
+                f"Please use process_document_file method for document files."
+            )
+        else:
+            # Use existing text chunking for .txt files
+            if isinstance(content, bytes):
+                text = content.decode("utf-8")
+            else:
+                text = content
+            return self.chunk_text(text, max_chunk_size=5000)
+
+    def process_document_file(self, file_path, file_extension):
+        """
+        Process a document file and return chunks.
+        This method handles the appropriate chunking strategy based on file type.
+
+        Args:
+            file_path (str): Path to the document file
+            file_extension (str): File extension (e.g., '.pdf', '.txt')
+
+        Returns:
+            list: List of text chunks
+        """
+        # Use Docling for chunking if it's a document file, otherwise use text chunking
+        if file_extension in [".pdf", ".docx", ".pptx", ".html"]:
+            # Use Docling for advanced document chunking
+            return self.chunk_text_with_docling(file_path)
+        else:
+            # For text files, we need to read the content first
+            # This method assumes the caller has already read the text content
+            # for non-document files
+            raise ValueError(
+                f"File extension {file_extension} not supported for direct file processing. "
+                f"Please read text content separately for text files."
+            )
+
+    def process_uploaded_file(self, file_path, file_extension, content=None):
+        """
+        Process an uploaded file completely - from file to chunks to embeddings.
+        This method handles the entire document processing workflow.
+
+        Args:
+            file_path (str): Path to the uploaded file
+            file_extension (str): File extension (e.g., '.pdf', '.txt')
+            content (bytes, optional): File content for text files
+
+        Returns:
+            list: List of processed chunks
+        """
+        # Process document based on file type
+        if file_extension in [".pdf", ".docx", ".pptx", ".html"]:
+            # Use Docling for advanced document chunking
+            chunks = self.chunk_text_with_docling(file_path)
+        else:
+            # Use existing text chunking for .txt files
+            if content is None:
+                # Read content from file if not provided
+                with open(file_path, "r", encoding="utf-8") as f:
+                    text = f.read()
+            else:
+                text = content.decode("utf-8")
+            chunks = self.chunk_text(text, max_chunk_size=5000)
+
+        # Process chunks (remove empty ones and strip whitespace)
+        chunks = [chunk.strip() for chunk in chunks if chunk.strip()]
 
         return chunks

@@ -56,7 +56,20 @@ def upload_document(file) -> Optional[Dict[str, Any]]:
             return None
 
     try:
-        files = {"file": (file.name, file, "text/plain")}
+        # Determine content type based on file extension
+        file_extension = os.path.splitext(file.name)[1].lower()
+        if file_extension == ".pdf":
+            content_type = "application/pdf"
+        elif file_extension == ".docx":
+            content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        elif file_extension == ".pptx":
+            content_type = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        elif file_extension == ".html":
+            content_type = "text/html"
+        else:
+            content_type = "text/plain"
+        
+        files = {"file": (file.name, file, content_type)}
         response = requests.post(
             f"{API_BASE_URL}/upload-document/", files=files, timeout=30
         )
@@ -137,8 +150,13 @@ def main():
 
         st.divider()
 
+        # Updated file uploader to support multiple document formats
+        st.subheader("Upload Documents")
+        st.caption("Supported formats: TXT, PDF, DOCX, PPTX, HTML")
         uploaded_file = st.file_uploader(
-            "Upload a text document", type=["txt"], key="file_uploader"
+            "Choose a file", 
+            type=["txt", "pdf", "docx", "pptx", "html"], 
+            key="file_uploader"
         )
 
         if (

@@ -11,6 +11,8 @@ A FastAPI application that provides endpoints for uploading text documents, crea
 - RESTful API with proper error handling and validation
 - Streamlit frontend for ChatGPT-like interface
 - Automatic document chunking for large files
+- **Advanced document parsing and chunking with Docling** (supports PDF, DOCX, PPTX, HTML)
+- **Proper service layer architecture** following SOLID principles
 
 ## Project Structure
 
@@ -21,12 +23,12 @@ A FastAPI application that provides endpoints for uploading text documents, crea
 │   ├── main.py            # Application entry point
 │   ├── api/               # API routes
 │   │   ├── __init__.py
-│   │   └── routes.py      # API endpoint definitions
+│   │   └── routes.py      # API endpoint definitions (HTTP concerns only)
 │   ├── core/              # Core application logic
 │   │   ├── __init__.py
 │   │   ├── config.py      # Configuration settings
 │   │   ├── qdrant_client.py # Qdrant client wrapper
-│   │   └── embedding_service.py # Embedding service
+│   │   └── embedding_service.py # Embedding service (document processing logic)
 │   ├── schemas/           # Pydantic models for request/response validation
 │   │   ├── __init__.py
 │   │   └── document.py
@@ -35,6 +37,9 @@ A FastAPI application that provides endpoints for uploading text documents, crea
 ├── streamlit_app.py     # Streamlit frontend application
 ├── test_api_connection.py # API connectivity test script
 ├── test_chunking.py     # Document chunking test script
+├── test_docling_chunking.py # Docling chunking test script
+├── test_service_delegation.py # Service delegation test script
+├── test_streamlit_updates.py # Streamlit updates test script
 ├── Dockerfile           # Docker configuration for FastAPI app
 ├── docker-compose.yml   # Multi-container setup (FastAPI + Qdrant + Streamlit)
 ├── .dockerignore        # Docker ignore file
@@ -44,6 +49,14 @@ A FastAPI application that provides endpoints for uploading text documents, crea
 ├── test_endpoints.py    # Test script
 └── README.md            # This file
 ```
+
+## Architecture
+
+This application follows a clean architecture with proper separation of concerns:
+
+- **Routes Layer**: Handles HTTP request/response concerns only
+- **Service Layer**: Contains business logic (document processing, embedding creation)
+- **Data Access Layer**: Handles data persistence (Qdrant vector storage)
 
 ## Installation
 
@@ -177,6 +190,13 @@ Upload a text file to be processed and stored in Qdrant.
 **Parameters:**
 - `file`: Text file to upload (required)
 
+**Supported file formats:**
+- `.txt` - Plain text files
+- `.pdf` - PDF documents (processed with Docling)
+- `.docx` - Word documents (processed with Docling)
+- `.pptx` - PowerPoint presentations (processed with Docling)
+- `.html` - HTML documents (processed with Docling)
+
 **Response:**
 ```json
 {
@@ -222,13 +242,22 @@ The Streamlit frontend provides a ChatGPT-like interface for interacting with yo
 2. Ask questions in the chat interface
 3. View retrieved document chunks and their relevance scores
 
-Features:
+**Features:**
 - Chat history persistence during the session
 - Document management in the sidebar
 - Visual display of retrieved results with similarity scores
 - Real-time API status monitoring
+- **Support for multiple document formats** (TXT, PDF, DOCX, PPTX, HTML)
 
-The frontend automatically detects whether it's running in Docker or locally and configures the API connection accordingly.
+**Supported File Formats:**
+The Streamlit interface now supports uploading:
+- `.txt` - Plain text files
+- `.pdf` - PDF documents (processed with Docling for intelligent parsing)
+- `.docx` - Word documents (processed with Docling)
+- `.pptx` - PowerPoint presentations (processed with Docling)
+- `.html` - HTML documents (processed with Docling)
+
+The frontend automatically detects the file type and sends the appropriate content type to the API.
 
 ## Testing
 
@@ -245,6 +274,21 @@ python test_api_connection.py
 Test document chunking:
 ```bash
 python test_chunking.py
+```
+
+Test Docling document chunking:
+```bash
+python test_docling_chunking.py
+```
+
+Test service delegation:
+```bash
+python test_service_delegation.py
+```
+
+Test Streamlit updates:
+```bash
+python test_streamlit_updates.py
 ```
 
 ## Configuration
