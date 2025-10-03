@@ -1,8 +1,9 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from fastapi.responses import JSONResponse
-from app.schemas.document import DocumentUploadResponse, QueryRequest, QueryResponse
+from app.schemas.document import DocumentUploadResponse, QueryRequest, QueryResponse, GenerateResponse
 from app.core.qdrant_client import QdrantService
 from app.core.embedding_service import EmbeddingService
+from app.core.response_service import ResponseService
 from qdrant_client.models import PointStruct
 import uuid
 import logging
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 # Global services
 qdrant_service = QdrantService()
 embedding_service = EmbeddingService()
+response_service = ResponseService()
 
 @router.on_event("startup")
 async def startup_event():
@@ -22,6 +24,7 @@ async def startup_event():
     try:
         qdrant_service.initialize_client()
         embedding_service.initialize_model()
+        response_service.initialize_client()
         logger.info("Services initialized successfully")
     except Exception as e:
         logger.error(f"Error initializing services: {e}")
@@ -108,19 +111,18 @@ async def upload_document(file: UploadFile = File(...)):
         logger.error(f"Error processing document: {e}")
         raise HTTPException(status_code=500, detail="Internal server error while processing document")
 
-@router.post("/query-document/", response_model=QueryResponse)
+@router.post("/query-document/", response_model=GenerateResponse)
 async def query_document(request: QueryRequest):
-    """Query the stored documents using similarity search"""
+    """Query the stored documents and generate a well-formatted response using OpenAI"""
     query_text = request.query.strip()
     
     if not query_text:
         raise HTTPException(status_code=400, detail="Query cannot be empty")
     
     try:
-        # Create embedding for the query
+        # First, search for relevant documents
         query_embedding = embedding_service.encode_text([query_text])[0]
         
-        # Search in Qdrant
         search_result = qdrant_service.search_points(
             query_vector=query_embedding,  
             limit=request.top_k or 5
@@ -136,13 +138,20 @@ async def query_document(request: QueryRequest):
                 "score": result.score
             })
         
-        return QueryResponse(
+        # Generate response using OpenAI
+        generated_response = response_service.generate_response(
             query=query_text,
-            results=results
+            retrieved_documents=results
+        )
+        
+        return GenerateResponse(
+            query=query_text,
+            response=generated_response,
+            retrieved_documents=results
         )
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error querying documents: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error while querying documents")
+        logger.error(f"Error processing query: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error while processing query")

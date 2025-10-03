@@ -71,7 +71,7 @@ def upload_document(file) -> Optional[Dict[str, Any]]:
         
         files = {"file": (file.name, file, content_type)}
         response = requests.post(
-            f"{API_BASE_URL}/upload-document/", files=files, timeout=600
+            f"{API_BASE_URL}/upload-document/", files=files, timeout=30
         )
         response.raise_for_status()
         return response.json()
@@ -89,7 +89,7 @@ def upload_document(file) -> Optional[Dict[str, Any]]:
 
 
 def query_documents(query: str, top_k: int = 5) -> Optional[Dict[str, Any]]:
-    """Query documents in the RAG system"""
+    """Query documents in the RAG system and generate response"""
     if st.session_state.api_status != "connected":
         if not check_api_status():
             st.error(
@@ -100,7 +100,7 @@ def query_documents(query: str, top_k: int = 5) -> Optional[Dict[str, Any]]:
     try:
         payload = {"query": query, "top_k": top_k}
         response = requests.post(
-            f"{API_BASE_URL}/query-document/", json=payload, timeout=600
+            f"{API_BASE_URL}/query-document/", json=payload, timeout=30
         )
         response.raise_for_status()
         return response.json()
@@ -115,7 +115,6 @@ def query_documents(query: str, top_k: int = 5) -> Optional[Dict[str, Any]]:
     except requests.exceptions.RequestException as e:
         st.error(f"Error querying documents: {str(e)}")
         return None
-
 
 def main():
     st.set_page_config(page_title="RAG Chat Interface", page_icon="💬", layout="wide")
@@ -225,27 +224,18 @@ def main():
         # Get response from API
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
+                # Use the query_documents endpoint for both retrieval and response generation
                 response = query_documents(prompt)
 
                 if response:
-                    # Extract the most relevant text from results
-                    if response["results"]:
-                        # Get the highest scoring result
-                        best_result = max(response["results"], key=lambda x: x["score"])
-                        answer = best_result["text"]
-                    else:
-                        answer = (
-                            "I couldn't find any relevant information in the documents."
-                        )
+                    # Display the generated response
+                    st.markdown(response["response"])
 
-                    # Display the answer
-                    st.markdown(answer)
-
-                    # Display all results in an expander
-                    if response["results"]:
+                    # Display retrieved documents in an expander
+                    if response["retrieved_documents"]:
                         st.markdown("---")
                         st.markdown("**Retrieved Documents:**")
-                        for i, result in enumerate(response["results"], 1):
+                        for i, result in enumerate(response["retrieved_documents"], 1):
                             with st.expander(
                                 f"Document {i} (Score: {result['score']:.4f})"
                             ):
@@ -256,8 +246,8 @@ def main():
                     st.session_state.messages.append(
                         {
                             "role": "assistant",
-                            "content": answer,
-                            "results": response["results"],
+                            "content": response["response"],
+                            "results": response["retrieved_documents"],
                         }
                     )
                 else:

@@ -22,3 +22,14 @@ class SearchResult(BaseModel):
 class QueryResponse(BaseModel):
     query: str
     results: List[SearchResult]
+
+
+class GenerateResponseRequest(BaseModel):
+    query: str
+    top_k: Optional[int] = 5
+
+
+class GenerateResponse(BaseModel):
+    query: str
+    response: str
+    retrieved_documents: List[SearchResult]
