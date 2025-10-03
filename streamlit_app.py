@@ -71,7 +71,7 @@ def upload_document(file) -> Optional[Dict[str, Any]]:
         
         files = {"file": (file.name, file, content_type)}
         response = requests.post(
-            f"{API_BASE_URL}/upload-document/", files=files, timeout=30
+            f"{API_BASE_URL}/upload-document/", files=files, timeout=600
         )
         response.raise_for_status()
         return response.json()
@@ -100,7 +100,7 @@ def query_documents(query: str, top_k: int = 5) -> Optional[Dict[str, Any]]:
     try:
         payload = {"query": query, "top_k": top_k}
         response = requests.post(
-            f"{API_BASE_URL}/query-document/", json=payload, timeout=30
+            f"{API_BASE_URL}/query-document/", json=payload, timeout=600
         )
         response.raise_for_status()
         return response.json()

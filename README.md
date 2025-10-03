@@ -1,11 +1,11 @@
 # FastAPI RAG Endpoint with Qdrant
 
-A FastAPI application that provides endpoints for uploading text documents, creating vector embeddings using OpenAI, and performing similarity search using Qdrant as the vector database.
+A FastAPI application that provides endpoints for uploading text documents, creating vector embeddings using sentence-transformers, and performing similarity search using Qdrant as the vector database.
 
 ## Features
 
 - Upload text files via API endpoint
-- Automatically create vector embeddings using OpenAI Embeddings API
+- Automatically create vector embeddings using `all-MiniLM-L6-v2` (free and open-source)
 - Store embeddings in Qdrant vector database
 - Query documents using similarity search
 - RESTful API with proper error handling and validation
@@ -40,6 +40,8 @@ A FastAPI application that provides endpoints for uploading text documents, crea
 ├── test_docling_chunking.py # Docling chunking test script
 ├── test_service_delegation.py # Service delegation test script
 ├── test_streamlit_updates.py # Streamlit updates test script
+├── test_embedding_model.py # Embedding model change test script
+├── fix_qdrant_collection.py # Script to fix Qdrant collection dimension issues
 ├── Dockerfile           # Docker configuration for FastAPI app
 ├── docker-compose.yml   # Multi-container setup (FastAPI + Qdrant + Streamlit)
 ├── .dockerignore        # Docker ignore file
@@ -75,12 +77,6 @@ This application follows a clean architecture with proper separation of concerns
 3. Install dependencies:
    ```bash
    pip install -r requirements.txt
-   ```
-
-4. Set up your OpenAI API key:
-   Create a `.env` file in the project root with your OpenAI API key:
-   ```
-   OPENAI_API_KEY=your_openai_api_key_here
    ```
 
 ## Usage
@@ -171,13 +167,40 @@ If you encounter the error "Requested X tokens, max 300000 tokens per request":
 
 1. **This is handled automatically** by the updated chunking implementation
 2. The system now automatically splits large documents into smaller chunks
-3. Each chunk is processed separately to stay within OpenAI's token limits
-4. The maximum chunk size is set to 5000 characters (well below the token limit)
+3. Each chunk is processed separately to stay within token limits
+4. The maximum chunk size is set to 5000 characters
 
 To test the chunking functionality:
 ```bash
 python test_chunking.py
 ```
+
+### Vector Dimension Mismatch Error
+
+If you see an error like:
+```
+Wrong input: Vector inserting error: expected dim: 1536, got 384
+```
+
+This happens when the Qdrant collection was created with the wrong vector dimension. To fix this:
+
+1. **Run the fix script:**
+   ```bash
+   python fix_qdrant_collection.py
+   ```
+
+2. **Or manually delete and recreate the collection:**
+   ```bash
+   # Access Qdrant dashboard at http://localhost:6333/dashboard
+   # Delete the existing collection
+   # Restart the FastAPI service
+   ```
+
+3. **Restart the services:**
+   ```bash
+   docker-compose down
+   docker-compose up --build
+   ```
 
 ## API Endpoints
 
@@ -259,6 +282,16 @@ The Streamlit interface now supports uploading:
 
 The frontend automatically detects the file type and sends the appropriate content type to the API.
 
+## Cost Benefits
+
+By switching to the `all-MiniLM-L6-v2` open-source embedding model:
+- **Zero cost** for embedding generation (no API fees)
+- **Faster processing** (runs locally without network latency)
+- **Privacy** (no data sent to external services)
+- **No rate limits** (process as many documents as needed)
+
+The `all-MiniLM-L6-v2` model provides good quality embeddings while being completely free to use.
+
 ## Testing
 
 Run the test script to verify the endpoints work correctly:
@@ -291,6 +324,16 @@ Test Streamlit updates:
 python test_streamlit_updates.py
 ```
 
+Test embedding model change:
+```bash
+python test_embedding_model.py
+```
+
+Fix Qdrant collection dimension issues:
+```bash
+python fix_qdrant_collection.py
+```
+
 ## Configuration
 
 The application can be configured using environment variables. See [config.py](app/core/config.py) for available settings.
@@ -312,7 +355,7 @@ This project follows SOLID principles:
 - File type validation for uploads
 - Secure dependency management
 - Docker security best practices
-- Environment variable management for API keys
+- Environment variable management for configuration
 
 ## License
 

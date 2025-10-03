@@ -1,9 +1,10 @@
 import logging
+from typing import List, Union
 
 from langchain_docling import DoclingLoader
 from docling.chunking import HierarchicalChunker
 from langchain_docling.loader import ExportType
-from openai import OpenAI
+from sentence_transformers import SentenceTransformer
 
 from app.core.config import settings
 
@@ -13,25 +14,22 @@ logger = logging.getLogger(__name__)
 
 class EmbeddingService:
     def __init__(self):
-        self.client = None
-        self.model_name = settings.OPENAI_EMBEDDING_MODEL
+        self.model = None
+        self.model_name = settings.EMBEDDING_MODEL
 
     def initialize_model(self):
-        """Initialize the OpenAI client"""
+        """Initialize the sentence-transformers model"""
         try:
-            if not settings.OPENAI_API_KEY:
-                raise ValueError("OPENAI_API_KEY is not set in the configuration")
-
-            self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
-            logger.info(f"OpenAI client initialized with model '{self.model_name}'")
+            self.model = SentenceTransformer(self.model_name)
+            logger.info(f"SentenceTransformer model initialized with model '{self.model_name}'")
         except Exception as e:
-            logger.error(f"Error initializing OpenAI client: {e}")
+            logger.error(f"Error initializing SentenceTransformer model: {e}")
             raise
 
-    def encode_text(self, texts):
-        """Encode texts into embeddings using OpenAI"""
-        if not self.client:
-            raise Exception("OpenAI client not initialized")
+    def encode_text(self, texts: Union[str, List[str]]) -> List[List[float]]:
+        """Encode texts into embeddings using sentence-transformers"""
+        if not self.model:
+            raise Exception("SentenceTransformer model not initialized")
 
         if isinstance(texts, str):
             texts = [texts]
@@ -47,12 +45,11 @@ class EmbeddingService:
                 processed_texts.append(text)
 
         try:
-            response = self.client.embeddings.create(
-                input=processed_texts, model=self.model_name
-            )
-
-            # Extract embeddings from response
-            embeddings = [item.embedding for item in response.data]
+            # Generate embeddings using sentence-transformers
+            embeddings = self.model.encode(processed_texts, convert_to_numpy=False)
+            # Convert to list format if needed
+            if hasattr(embeddings, 'tolist'):
+                embeddings = embeddings.tolist()
             return embeddings
 
         except Exception as e:

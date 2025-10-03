@@ -18,23 +18,38 @@ class QdrantService:
                 host=settings.QDRANT_HOST, port=settings.QDRANT_PORT
             )
 
+            # Determine vector dimension based on embedding model
+            if settings.EMBEDDING_MODEL == "all-MiniLM-L6-v2":
+                vector_dimension = 384  # all-MiniLM-L6-v2 dimension
+            else:
+                vector_dimension = 1536  # Default for OpenAI embeddings
+
             # Create collection if it doesn't exist
             try:
-                self.client.get_collection(self.collection_name)
+                collection_info = self.client.get_collection(self.collection_name)
                 logger.info(f"Collection '{self.collection_name}' already exists")
-            except (
-                Exception
-            ) as e:  # Fixed: Catch specific exception instead of bare except
+                # Check if the existing collection has the correct vector dimension
+                existing_dimension = collection_info.config.params.vectors.size
+                if existing_dimension != vector_dimension:
+                    logger.warning(
+                        f"Collection has incorrect dimension: expected {vector_dimension}, got {existing_dimension}"
+                    )
+                    logger.warning(
+                        "You may need to delete the existing collection and recreate it with the correct dimension"
+                    )
+            except Exception as e:
                 logger.info(
                     f"Collection '{self.collection_name}' does not exist, creating it..."
                 )
-                # OpenAI embeddings have 1536 dimensions
+                # Create collection with the correct vector dimension
                 self.client.create_collection(
                     collection_name=self.collection_name,
-                    vectors_config=VectorParams(size=1536, distance=Distance.COSINE),
+                    vectors_config=VectorParams(
+                        size=vector_dimension, distance=Distance.COSINE
+                    ),
                 )
                 logger.info(
-                    f"Collection '{self.collection_name}' created successfully with 1536 dimensions"
+                    f"Collection '{self.collection_name}' created successfully with {vector_dimension} dimensions"
                 )
 
         except Exception as e:
