@@ -172,60 +172,7 @@ class EmbeddingService:
             chunks.append(chunk)
 
         return chunks
-
-    def process_document_content(self, content, file_extension):
-        """
-        Process document content and return chunks.
-        This method handles the appropriate chunking strategy based on file type.
-
-        Args:
-            content (bytes or str): Document content
-            file_extension (str): File extension (e.g., '.pdf', '.txt')
-
-        Returns:
-            list: List of text chunks
-        """
-        # Use Docling for chunking if it's a document file, otherwise use text chunking
-        if file_extension in [".pdf", ".docx", ".pptx", ".html"]:
-            # For document files, we need to save to a temporary file first
-            # This method is meant for text content processing
-            raise ValueError(
-                f"File extension {file_extension} requires file-based processing. "
-                f"Please use process_document_file method for document files."
-            )
-        else:
-            # Use existing text chunking for .txt files
-            if isinstance(content, bytes):
-                text = content.decode("utf-8")
-            else:
-                text = content
-            return self.chunk_text(text, max_chunk_size=5000)
-
-    def process_document_file(self, file_path, file_extension):
-        """
-        Process a document file and return chunks.
-        This method handles the appropriate chunking strategy based on file type.
-
-        Args:
-            file_path (str): Path to the document file
-            file_extension (str): File extension (e.g., '.pdf', '.txt')
-
-        Returns:
-            list: List of text chunks
-        """
-        # Use Docling for chunking if it's a document file, otherwise use text chunking
-        if file_extension in [".pdf", ".docx", ".pptx", ".html"]:
-            # Use Docling for advanced document chunking
-            return self.chunk_text_with_docling(file_path)
-        else:
-            # For text files, we need to read the content first
-            # This method assumes the caller has already read the text content
-            # for non-document files
-            raise ValueError(
-                f"File extension {file_extension} not supported for direct file processing. "
-                f"Please read text content separately for text files."
-            )
-
+        
     def process_uploaded_file(self, file_path, file_extension, content=None):
         """
         Process an uploaded file completely - from file to chunks to embeddings.
