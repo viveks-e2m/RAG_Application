@@ -37,28 +37,9 @@ A FastAPI application that provides endpoints for uploading text documents, crea
 │   └── models/            # Database models (if any)
 ├── requirements.txt      # Project dependencies
 ├── streamlit_app.py     # Streamlit frontend application
-├── test_api_connection.py # API connectivity test script
-├── test_chunking.py     # Document chunking test script
-├── test_docling_chunking.py # Docling chunking test script
-├── test_service_delegation.py # Service delegation test script
-├── test_streamlit_updates.py # Streamlit updates test script
-├── test_embedding_model.py # Embedding model change test script
-├── test_qdrant_dimension.py # Qdrant dimension test script
-├── test_response_service.py # Response service test script
-├── test_refactored_api.py # Refactored API test script
-├── test_frontend_improvements.py # Frontend improvements test script
-├── test_detailed_responses.py # Detailed responses test script
-├── test_api_endpoints.py # API endpoints test script
-├── verify_routes.py # Route verification script
-├── troubleshoot_api.py # API troubleshooting script
-├── fix_qdrant_collection.py # Script to fix Qdrant collection dimension issues
 ├── Dockerfile           # Docker configuration for FastAPI app
 ├── docker-compose.yml   # Multi-container setup (FastAPI + Qdrant + Streamlit)
 ├── .dockerignore        # Docker ignore file
-├── start.sh             # Application startup script
-├── run_docker.sh        # Docker startup script
-├── start_streamlit.sh   # Streamlit frontend startup script
-├── test_endpoints.py    # Test script
 └── README.md            # This file
 ```
 
