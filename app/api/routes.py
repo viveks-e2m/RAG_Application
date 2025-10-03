@@ -1,0 +1,125 @@
+from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi.responses import JSONResponse
+from app.schemas.document import DocumentUploadResponse, QueryRequest, QueryResponse
+from app.core.qdrant_client import QdrantService
+from app.core.embedding_service import EmbeddingService
+from qdrant_client.models import PointStruct
+import uuid
+import logging
+
+router = APIRouter()
+logger = logging.getLogger(__name__)
+
+# Global services
+qdrant_service = QdrantService()
+embedding_service = EmbeddingService()
+
+@router.on_event("startup")
+async def startup_event():
+    """Initialize services on startup"""
+    try:
+        qdrant_service.initialize_client()
+        embedding_service.initialize_model()
+        logger.info("Services initialized successfully")
+    except Exception as e:
+        logger.error(f"Error initializing services: {e}")
+        raise
+
+@router.post("/upload-document/", response_model=DocumentUploadResponse)
+async def upload_document(file: UploadFile = File(...)):
+    """Upload a text file, create embeddings, and store in Qdrant"""
+    # Validate file type
+    if not file.filename.endswith('.txt'):
+        raise HTTPException(status_code=400, detail="Only text files are allowed")
+    
+    try:
+        # Read file content
+        content = await file.read()
+        text = content.decode('utf-8')
+        
+        # Split text into chunks with size limit to avoid token limit issues
+        chunks = embedding_service.chunk_text(text, max_chunk_size=5000)  # Limit each chunk to 5000 characters
+        chunks = [chunk.strip() for chunk in chunks if chunk.strip()]
+        
+        if not chunks:
+            raise HTTPException(status_code=400, detail="No valid content found in the document")
+        
+        # Process chunks in batches to avoid OpenAI rate limits and token limits
+        all_embeddings = []
+        batch_size = 10  # Process 10 chunks at a time
+        
+        for i in range(0, len(chunks), batch_size):
+            batch_chunks = chunks[i:i + batch_size]
+            try:
+                batch_embeddings = embedding_service.encode_text(batch_chunks)
+                all_embeddings.extend(batch_embeddings)
+            except Exception as e:
+                logger.error(f"Error creating embeddings for batch {i//batch_size + 1}: {e}")
+                raise HTTPException(status_code=500, detail=f"Error processing document chunk {i//batch_size + 1}: {str(e)}")
+        
+        # Prepare points for Qdrant
+        points = []
+        for i, (chunk, embedding) in enumerate(zip(chunks, all_embeddings)):
+            point_id = str(uuid.uuid4())
+            points.append(PointStruct(
+                id=point_id,
+                vector=embedding,
+                payload={
+                    "document_name": file.filename,
+                    "chunk_index": i,
+                    "text": chunk
+                }
+            ))
+        
+        # Store points in Qdrant
+        qdrant_service.upsert_points(points)
+        
+        return DocumentUploadResponse(
+            message=f"Document '{file.filename}' processed and stored successfully",
+            chunks_processed=len(chunks)
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error processing document: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error while processing document")
+
+@router.post("/query-document/", response_model=QueryResponse)
+async def query_document(request: QueryRequest):
+    """Query the stored documents using similarity search"""
+    query_text = request.query.strip()
+    
+    if not query_text:
+        raise HTTPException(status_code=400, detail="Query cannot be empty")
+    
+    try:
+        # Create embedding for the query
+        query_embedding = embedding_service.encode_text([query_text])[0]
+        
+        # Search in Qdrant
+        search_result = qdrant_service.search_points(
+            query_vector=query_embedding,  
+            limit=request.top_k or 5
+        )
+        
+        # Format results
+        results = []
+        for result in search_result:
+            results.append({
+                "document_name": result.payload.get("document_name"),
+                "chunk_index": result.payload.get("chunk_index"),
+                "text": result.payload.get("text"),
+                "score": result.score
+            })
+        
+        return QueryResponse(
+            query=query_text,
+            results=results
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error querying documents: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error while querying documents")
