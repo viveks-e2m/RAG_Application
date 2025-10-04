@@ -14,19 +14,19 @@ class QdrantService:
     def initialize_client(self):
         """Initialize Qdrant client and create collection if it doesn't exist"""
         try:
-            self.client = QdrantClient(host=settings.QDRANT_HOST, port=settings.QDRANT_PORT)
+            self.client = QdrantClient(
+                host=settings.QDRANT_HOST, port=settings.QDRANT_PORT
+            )
 
-            # Determine vector dimension based on embedding model
             if settings.EMBEDDING_MODEL == "all-MiniLM-L6-v2":
                 vector_dimension = 384  # all-MiniLM-L6-v2 dimension
             else:
                 vector_dimension = 1536  # Default for OpenAI embeddings
 
-            # Create collection if it doesn't exist
             try:
                 collection_info = self.client.get_collection(self.collection_name)
                 logger.info(f"Collection '{self.collection_name}' already exists")
-                # Check if the existing collection has the correct vector dimension
+
                 existing_dimension = collection_info.config.params.vectors.size
                 if existing_dimension != vector_dimension:
                     logger.warning(
