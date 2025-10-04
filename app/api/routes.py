@@ -6,7 +6,7 @@ from app.schemas.document import (
     QueryResponse,
     GenerateResponse,
 )
-from app.core.qdrant_client import QdrantService
+from app.core.qdrant_client_service import QdrantService
 from app.core.embedding_service import EmbeddingService
 from app.core.response_service import ResponseService
 from qdrant_client.models import PointStruct

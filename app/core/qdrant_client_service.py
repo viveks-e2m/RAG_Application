@@ -14,9 +14,7 @@ class QdrantService:
     def initialize_client(self):
         """Initialize Qdrant client and create collection if it doesn't exist"""
         try:
-            self.client = QdrantClient(
-                host=settings.QDRANT_HOST, port=settings.QDRANT_PORT
-            )
+            self.client = QdrantClient(host=settings.QDRANT_HOST, port=settings.QDRANT_PORT)
 
             # Determine vector dimension based on embedding model
             if settings.EMBEDDING_MODEL == "all-MiniLM-L6-v2":
