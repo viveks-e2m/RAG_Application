@@ -21,7 +21,9 @@ class EmbeddingService:
         """Initialize the sentence-transformers model"""
         try:
             self.model = SentenceTransformer(self.model_name)
-            logger.info(f"SentenceTransformer model initialized with model '{self.model_name}'")
+            logger.info(
+                f"SentenceTransformer model initialized with model '{self.model_name}'"
+            )
         except Exception as e:
             logger.error(f"Error initializing SentenceTransformer model: {e}")
             raise
@@ -48,7 +50,7 @@ class EmbeddingService:
             # Generate embeddings using sentence-transformers
             embeddings = self.model.encode(processed_texts, convert_to_numpy=False)
             # Convert to list format if needed
-            if hasattr(embeddings, 'tolist'):
+            if hasattr(embeddings, "tolist"):
                 embeddings = embeddings.tolist()
             return embeddings
 
@@ -169,7 +171,7 @@ class EmbeddingService:
             chunks.append(chunk)
 
         return chunks
-        
+
     def process_uploaded_file(self, file_path, file_extension, content=None):
         """
         Process an uploaded file completely - from file to chunks to embeddings.

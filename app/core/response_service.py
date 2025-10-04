@@ -167,9 +167,11 @@ Answer:
             content = doc.get("text", "")
             source = doc.get("document_name", "Unknown")
             score = doc.get("score", 0)
-            
+
             # Provide more detailed information in the fallback response
-            response += f"Document {i} (Source: {source}, Relevance Score: {score:.4f}):\n"
+            response += (
+                f"Document {i} (Source: {source}, Relevance Score: {score:.4f}):\n"
+            )
             response += f"Content: {content}\n\n"
 
         response += "Please note: This is a fallback response. The AI-generated response would provide a more structured and detailed answer based on this information."
