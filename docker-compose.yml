@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.8"
 
 services:
   fastapi-app:
@@ -30,7 +30,14 @@ services:
     depends_on:
       - fastapi-app
     restart: unless-stopped
-    command: ["streamlit", "run", "streamlit_app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+    command:
+      [
+        "streamlit",
+        "run",
+        "streamlit_app.py",
+        "--server.port=8501",
+        "--server.address=0.0.0.0",
+      ]
 
   qdrant:
     image: qdrant/qdrant:v1.7.0
