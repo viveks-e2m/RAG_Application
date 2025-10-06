@@ -340,6 +340,55 @@ async def query_videos(request: VideoQueryRequest):
         )
 
 
+@router.post("/query-video-transcripts/", response_model=VideoQueryResponse)
+async def query_video_transcripts(request: VideoQueryRequest):
+    """Query stored video transcript segments using semantic search"""
+    query_text = request.query.strip()
+
+    if not query_text:
+        raise HTTPException(status_code=400, detail="Query cannot be empty")
+
+    try:
+        # Create a temporary VideoRAGSystemQdrant instance to perform the search
+        # We'll use the same collection name and Qdrant configuration
+        video_rag_system = VideoRAGSystemQdrant(
+            model_size="small",
+            chunk_size=45,
+            chunk_overlap=15,
+            qdrant_host="qdrant",
+            qdrant_port=6333,
+        )
+
+        # Perform search on transcript segments
+        search_results = video_rag_system.search(query_text, request.top_k or 5)
+
+        # Format results similar to video metadata results for consistency
+        results = []
+        for result in search_results:
+            # Create a mock video result with transcript information
+            # For duration, we'll use the average of start and end times
+            avg_duration = (result["start_time"] + result["end_time"]) / 2
+            results.append(
+                VideoSearchResult(
+                    video_file_name="Video Transcript Segment",
+                    description=result["text"],
+                    duration=avg_duration,
+                    tags=["transcript", "segment"],
+                    score=result["similarity"],
+                )
+            )
+
+        return VideoQueryResponse(query=query_text, results=results)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error processing video transcript query: {e}")
+        raise HTTPException(
+            status_code=500, detail="Internal server error while processing video transcript query"
+        )
+
+
 @router.post("/query-document/", response_model=GenerateResponse)
 async def query_document(request: QueryRequest):
     """Query the stored documents and generate a well-formatted response using OpenAI"""

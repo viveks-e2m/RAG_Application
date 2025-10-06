@@ -8,7 +8,7 @@ import whisper
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
 from app.core.embedding_service import EmbeddingService
-
+from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 
@@ -43,7 +43,7 @@ class VideoRAGSystemQdrant:
         self.qdrant_client = QdrantClient(host=qdrant_host, port=qdrant_port)
 
         # Collection name for storing video segments
-        self.collection_name = "video_segments"
+        self.collection_name = settings.COLLECTION_NAME
 
         # Chunking parameters
         self.chunk_size = chunk_size  # in seconds
@@ -128,112 +128,120 @@ class VideoRAGSystemQdrant:
         if not segments:
             return []
 
-        # Simple approach: group segments by time windows
+        # Initialize result list
         chunked_segments = []
-        current_chunk = {
-            "text": "",
-            "start": segments[0]["start"],
-            "end": segments[0]["start"]
-        }
-        
-        for segment in segments:
-            segment_start = segment["start"]
-            segment_end = segment["end"]
-            segment_text = segment["text"].strip()
-            
-            # Skip empty segments
-            if not segment_text:
-                continue
-                
-            # If current chunk would exceed the desired size, save it and start a new one
-            if (segment_end - current_chunk["start"]) > self.chunk_size and current_chunk["text"]:
-                # Save current chunk
-                chunked_segments.append({
-                    "text": current_chunk["text"].strip(),
-                    "start": current_chunk["start"],
-                    "end": current_chunk["end"]
-                })
-                
-                # Start new chunk with overlap
-                # Find segments that fall within the overlap window
-                overlap_start = max(segment_start - self.chunk_overlap, current_chunk["start"])
-                new_chunk_text = ""
-                new_chunk_start = segment_start
-                
-                # Collect text from segments in the overlap window
-                for prev_segment in reversed(segments):
-                    if prev_segment["start"] >= overlap_start and prev_segment["start"] < segment_start:
-                        if new_chunk_text:
-                            new_chunk_text = prev_segment["text"].strip() + " " + new_chunk_text
-                        else:
-                            new_chunk_text = prev_segment["text"].strip()
-                        new_chunk_start = min(new_chunk_start, prev_segment["start"])
-                    elif prev_segment["start"] < overlap_start:
-                        break
-                
-                # Add current segment to the new chunk
-                if new_chunk_text:
-                    current_chunk = {
-                        "text": new_chunk_text + " " + segment_text,
-                        "start": new_chunk_start,
-                        "end": segment_end
-                    }
-                else:
-                    current_chunk = {
-                        "text": segment_text,
-                        "start": segment_start,
-                        "end": segment_end
-                    }
-            else:
+
+        # Convert parameters to float for precise calculations
+        target_chunk_duration = float(self.chunk_size)
+        overlap_duration = float(self.chunk_overlap)
+
+        # Group segments by time windows
+        i = 0
+        while i < len(segments):
+            # Start a new chunk
+            chunk_start_time = float(segments[i]["start"])
+            chunk_end_time = chunk_start_time
+            chunk_text = ""
+
+            # Collect segments for current chunk until we reach target duration
+            j = i
+            while j < len(segments):
+                segment = segments[j]
+                segment_start = float(segment["start"])
+                segment_end = float(segment["end"])
+                segment_text = segment["text"].strip()
+
+                # Skip empty segments
+                if not segment_text:
+                    j += 1
+                    continue
+
+                # Check if adding this segment would exceed the target chunk size
+                proposed_end = segment_end
+                if (
+                    chunk_text
+                    and (proposed_end - chunk_start_time) > target_chunk_duration
+                ):
+                    break  # Would exceed chunk size, finalize current chunk
+
                 # Add segment to current chunk
-                if current_chunk["text"]:
-                    current_chunk["text"] += " " + segment_text
+                if chunk_text:
+                    chunk_text += " " + segment_text
                 else:
-                    current_chunk["text"] = segment_text
-                    current_chunk["start"] = segment_start
-                current_chunk["end"] = segment_end
+                    chunk_text = segment_text
 
-        # Don't forget the last chunk
-        if current_chunk["text"].strip():
-            chunked_segments.append({
-                "text": current_chunk["text"].strip(),
-                "start": current_chunk["start"],
-                "end": current_chunk["end"]
-            })
+                chunk_end_time = segment_end
+                j += 1
 
-        # If chunking didn't work well, fall back to simple grouping
-        if len(chunked_segments) < 2:
+            # Add the completed chunk if it has content
+            if chunk_text.strip():
+                chunked_segments.append(
+                    {
+                        "text": chunk_text.strip(),
+                        "start": chunk_start_time,
+                        "end": chunk_end_time,
+                    }
+                )
+
+            # If we've processed all segments, break
+            if j >= len(segments):
+                break
+
+            # Find the next starting point with overlap
+            # Calculate where the overlap should start
+            next_chunk_ideal_start = chunk_end_time - overlap_duration
+
+            # Find the segment that starts closest to the overlap start time
+            next_i = j  # Default to start after current chunk
+            for k in range(i + 1, j):
+                segment_start = float(segments[k]["start"])
+                if segment_start >= next_chunk_ideal_start:
+                    next_i = k
+                    break
+
+            # Ensure we always move forward to avoid infinite loops
+            i = max(next_i, i + 1)
+
+        # If chunking resulted in too few chunks for a long transcript, fall back to simple grouping
+        if len(chunked_segments) <= 1 and len(segments) > 10:
+            logger.info(
+                "Chunking resulted in too few chunks, using simple grouping approach"
+            )
             chunked_segments = self._simple_chunk_grouping(segments)
-            
+
         return chunked_segments
 
     def _simple_chunk_grouping(self, segments: List[Dict]) -> List[Dict]:
         """
         Simple grouping approach when complex chunking fails
-        
+
         Args:
             segments (List[Dict]): Original transcript segments
-            
+
         Returns:
             List[Dict]: Grouped segments
         """
         if not segments:
             return []
-            
+
         chunked_segments = []
         group_size = max(3, len(segments) // 10)  # Group into roughly 10 chunks
-        
+
         for i in range(0, len(segments), group_size):
-            group = segments[i:i + group_size]
+            group = segments[i : i + group_size]
             if group:
-                combined_text = " ".join([seg["text"].strip() for seg in group if seg["text"].strip()])
+                combined_text = " ".join(
+                    [seg["text"].strip() for seg in group if seg["text"].strip()]
+                )
                 if combined_text:
-                    chunked_segments.append({
-                        "text": combined_text,
-                        "start": group[0]["start"],
-                        "end": group[-1]["end"]
-                    })
-        
+                    chunked_segments.append(
+                        {
+                            "text": combined_text,
+                            "start": group[0]["start"],
+                            "end": group[-1]["end"],
+                        }
+                    )
+
         return chunked_segments if chunked_segments else segments
 
     def save_transcript_to_file(self, segments: List[Dict], output_file: str):
