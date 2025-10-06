@@ -1,3 +1,8 @@
+import uuid
+import logging
+import tempfile
+import os
+
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from fastapi.responses import JSONResponse
 from app.schemas.document import (
@@ -6,14 +11,19 @@ from app.schemas.document import (
     QueryResponse,
     GenerateResponse,
 )
+from app.schemas.video import (
+    VideoUploadRequest,
+    VideoEmbeddingResponse,
+    VideoQueryRequest,
+    VideoQueryResponse,
+    VideoSearchResult,
+)
 from app.core.qdrant_client_service import QdrantService
 from app.core.embedding_service import EmbeddingService
 from app.core.response_service import ResponseService
+from app.core.video_embedding_service import VideoEmbeddingService
+from app.core.video_rag_system import VideoRAGSystemQdrant
 from qdrant_client.models import PointStruct
-import uuid
-import logging
-import tempfile
-import os
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -22,6 +32,7 @@ logger = logging.getLogger(__name__)
 qdrant_service = QdrantService()
 embedding_service = EmbeddingService()
 response_service = ResponseService()
+video_embedding_service = VideoEmbeddingService()
 
 
 @router.on_event("startup")
@@ -31,6 +42,7 @@ async def startup_event():
         qdrant_service.initialize_client()
         embedding_service.initialize_model()
         response_service.initialize_client()
+        video_embedding_service.initialize_model()
         logger.info("Services initialized successfully")
     except Exception as e:
         logger.error(f"Error initializing services: {e}")
@@ -105,6 +117,7 @@ async def upload_document(file: UploadFile = File(...)):
                             "document_name": file.filename,
                             "chunk_index": i,
                             "text": chunk,
+                            "content_type": "document",  # Distinguish document from video
                         },
                     )
                 )
@@ -135,6 +148,198 @@ async def upload_document(file: UploadFile = File(...)):
         )
 
 
+@router.post("/upload-video/", response_model=VideoEmbeddingResponse)
+async def upload_video(file: UploadFile = File(...)):
+    """Upload a video file, extract metadata, create embeddings, and store in Qdrant"""
+    # Validate video file type
+    allowed_extensions = [".mp4", ".avi", ".mov", ".mkv", ".wmv", ".flv", ".webm"]
+    file_extension = os.path.splitext(file.filename)[1].lower()
+
+    if file_extension not in allowed_extensions:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Only {', '.join(allowed_extensions)} video files are allowed",
+        )
+
+    try:
+        # Save video file temporarily
+        with tempfile.NamedTemporaryFile(
+            delete=False, suffix=file_extension
+        ) as temp_file:
+            content = await file.read()
+            temp_file.write(content)
+            temp_file_path = temp_file.name
+
+        try:
+            # Process video using VideoRAGSystemQdrant for full processing
+            video_rag_system = VideoRAGSystemQdrant(
+                model_size="small",
+                chunk_size=45,
+                chunk_overlap=15,
+                qdrant_host="qdrant",
+                qdrant_port=6333,
+            )
+
+            # Process the video
+            video_rag_system.process_video(temp_file_path)
+
+            # Also process basic metadata for search
+            video_file_name = file.filename
+            description = f"Video file: {video_file_name}. This is a video content that can be searched using semantic queries."
+
+            # Process video metadata using the video embedding service
+            metadata = video_embedding_service.process_video_metadata(
+                video_file_name=video_file_name,
+                description=description,
+                duration=None,  # Could extract actual duration with video processing libraries
+                tags=["video", "uploaded"],  # Default tags
+            )
+
+            # Clean up temporary file
+            os.unlink(temp_file_path)
+
+            # Create a unique point ID for Qdrant
+            point_id = str(uuid.uuid4())
+
+            # Prepare point for Qdrant storage
+            point = PointStruct(
+                id=point_id,
+                vector=metadata["description_embedding"],
+                payload={
+                    "video_file_name": metadata["video_file_name"],
+                    "description": metadata["description"],
+                    "duration": metadata["duration"],
+                    "tags": metadata["tags"],
+                    "content_type": "video",  # Distinguish video from document
+                },
+            )
+
+            # Store point in Qdrant
+            qdrant_service.upsert_points([point])
+
+            return VideoEmbeddingResponse(
+                video_file_name=video_file_name,
+                message=f"Video '{video_file_name}' processed and stored successfully",
+                embedding_dimensions=len(metadata["description_embedding"]),
+            )
+
+        except Exception as e:
+            # Clean up temporary file in case of error
+            if "temp_file_path" in locals():
+                try:
+                    os.unlink(temp_file_path)
+                except:
+                    pass
+            raise e
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error processing video: {e}")
+        raise HTTPException(
+            status_code=500, detail="Internal server error while processing video"
+        )
+
+
+@router.post("/process-video-metadata/", response_model=VideoEmbeddingResponse)
+async def process_video_metadata(request: VideoUploadRequest):
+    """Process video metadata and create embeddings for video descriptions"""
+    try:
+        # Process video metadata using the video embedding service
+        metadata = video_embedding_service.process_video_metadata(
+            video_file_name=request.video_file_name,
+            description=request.description,
+            duration=request.duration,
+            tags=request.tags,
+        )
+
+        # Create a unique point ID for Qdrant
+        point_id = str(uuid.uuid4())
+
+        # Prepare point for Qdrant storage
+        point = PointStruct(
+            id=point_id,
+            vector=metadata["description_embedding"],
+            payload={
+                "video_file_name": metadata["video_file_name"],
+                "description": metadata["description"],
+                "duration": metadata["duration"],
+                "tags": metadata["tags"],
+                "content_type": "video",  # Distinguish video from document
+            },
+        )
+
+        # Store point in Qdrant
+        qdrant_service.upsert_points([point])
+
+        return VideoEmbeddingResponse(
+            video_file_name=request.video_file_name,
+            message=f"Video metadata for '{request.video_file_name}' processed and stored successfully",
+            embedding_dimensions=len(metadata["description_embedding"]),
+        )
+
+    except Exception as e:
+        logger.error(f"Error processing video metadata: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error while processing video metadata",
+        )
+
+
+@router.post("/query-videos/", response_model=VideoQueryResponse)
+async def query_videos(request: VideoQueryRequest):
+    """Query stored video metadata using semantic search"""
+    query_text = request.query.strip()
+
+    if not query_text:
+        raise HTTPException(status_code=400, detail="Query cannot be empty")
+
+    try:
+        # Generate embedding for the query
+        query_embedding = video_embedding_service.encode_video_descriptions(
+            [query_text]
+        )[0]
+
+        # Search in Qdrant - we'll need to filter for video content type
+        # For now, we'll search all and filter results
+        search_result = qdrant_service.search_points(
+            query_vector=query_embedding, limit=request.top_k or 5
+        )
+
+        # Filter results to only include videos
+        video_results = [
+            result
+            for result in search_result
+            if result.payload.get("content_type") == "video"
+        ]
+
+        # Take only the requested number of results
+        video_results = video_results[: request.top_k or 5]
+
+        # Format results
+        results = []
+        for result in video_results:
+            results.append(
+                VideoSearchResult(
+                    video_file_name=result.payload.get("video_file_name", ""),
+                    description=result.payload.get("description", ""),
+                    duration=result.payload.get("duration"),
+                    tags=result.payload.get("tags", []),
+                    score=result.score,
+                )
+            )
+
+        return VideoQueryResponse(query=query_text, results=results)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error processing video query: {e}")
+        raise HTTPException(
+            status_code=500, detail="Internal server error while processing video query"
+        )
+
+
 @router.post("/query-document/", response_model=GenerateResponse)
 async def query_document(request: QueryRequest):
     """Query the stored documents and generate a well-formatted response using OpenAI"""
@@ -151,9 +356,19 @@ async def query_document(request: QueryRequest):
             query_vector=query_embedding, limit=request.top_k or 5
         )
 
+        # Filter results to only include documents
+        document_results = [
+            result
+            for result in search_result
+            if result.payload.get("content_type") == "document"
+        ]
+
+        # Take only the requested number of results
+        document_results = document_results[: request.top_k or 5]
+
         # Format results
         results = []
-        for result in search_result:
+        for result in document_results:
             results.append(
                 {
                     "document_name": result.payload.get("document_name"),
