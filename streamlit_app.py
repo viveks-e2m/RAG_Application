@@ -88,6 +88,48 @@ def upload_document(file) -> Optional[Dict[str, Any]]:
         return None
 
 
+def upload_video(file) -> Optional[Dict[str, Any]]:
+    """Upload a video to the RAG system"""
+    if st.session_state.api_status != "connected":
+        if not check_api_status():
+            st.error(
+                "API is not accessible. Please make sure the FastAPI server is running."
+            )
+            return None
+
+    try:
+        # Determine content type based on file extension
+        file_extension = os.path.splitext(file.name)[1].lower()
+        if file_extension == ".mp4":
+            content_type = "video/mp4"
+        elif file_extension == ".avi":
+            content_type = "video/x-msvideo"
+        elif file_extension == ".mov":
+            content_type = "video/quicktime"
+        elif file_extension == ".mkv":
+            content_type = "video/x-matroska"
+        else:
+            content_type = "video/unknown"
+        
+        files = {"file": (file.name, file, content_type)}
+        response = requests.post(
+            f"{API_BASE_URL}/upload-video/", files=files, timeout=600
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.ConnectionError:
+        st.error(
+            "Cannot connect to the API. Please make sure the FastAPI server is running."
+        )
+        return None
+    except requests.exceptions.Timeout:
+        st.error("API request timed out. Please try again.")
+        return None
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error uploading video: {str(e)}")
+        return None
+
+
 def query_documents(query: str, top_k: int = 10) -> Optional[Dict[str, Any]]:
     """Query documents in the RAG system and generate response"""
     if st.session_state.api_status != "connected":
@@ -117,6 +159,35 @@ def query_documents(query: str, top_k: int = 10) -> Optional[Dict[str, Any]]:
         return None
 
 
+def query_videos(query: str, top_k: int = 10) -> Optional[Dict[str, Any]]:
+    """Query videos in the RAG system"""
+    if st.session_state.api_status != "connected":
+        if not check_api_status():
+            st.error(
+                "API is not accessible. Please make sure the FastAPI server is running."
+            )
+            return None
+
+    try:
+        payload = {"query": query, "top_k": top_k}
+        response = requests.post(
+            f"{API_BASE_URL}/query-videos/", json=payload, timeout=600
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.ConnectionError:
+        st.error(
+            "Cannot connect to the API. Please make sure the FastAPI server is running."
+        )
+        return None
+    except requests.exceptions.Timeout:
+        st.error("API request timed out. Please try again.")
+        return None
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error querying videos: {str(e)}")
+        return None
+
+
 def format_document_preview(content: str, max_length: int = 300) -> str:
     """Format document content for preview display"""
     if len(content) <= max_length:
@@ -141,6 +212,25 @@ def display_document_results(documents: List[Dict[str, Any]], expanded: bool = F
         # Single document view
         for i, doc in enumerate(documents):
             display_single_document(doc, i+1, expanded)
+
+
+def display_video_results(videos: List[Dict[str, Any]], expanded: bool = False):
+    """Display video results in a structured format"""
+    st.markdown("### 🎥 Retrieved Videos")
+    
+    # Show summary statistics
+    st.markdown(f"**Found {len(videos)} relevant video{'s' if len(videos) != 1 else ''}**")
+    
+    # Create tabs for better organization if there are multiple videos
+    if len(videos) > 1:
+        tabs = st.tabs([f"Video {i+1}" for i in range(len(videos))])
+        for i, (tab, video) in enumerate(zip(tabs, videos)):
+            with tab:
+                display_single_video(video, i+1, expanded)
+    else:
+        # Single video view
+        for i, video in enumerate(videos):
+            display_single_video(video, i+1, expanded)
 
 
 def display_single_document(doc: Dict[str, Any], index: int, expanded: bool = False):
@@ -172,11 +262,35 @@ def display_single_document(doc: Dict[str, Any], index: int, expanded: bool = Fa
         st.markdown(f"**Characters:** {len(doc['text'])}")
 
 
+def display_single_video(video: Dict[str, Any], index: int, expanded: bool = False):
+    """Display a single video in a structured format"""
+    # Video header with score
+    score_percentage = min(100, max(0, int(video['score'] * 100)))
+    st.markdown(f"**🎥 Video:** `{video['video_file_name']}`")
+    st.progress(score_percentage/100, text=f"Relevance Score: {video['score']:.4f} ({score_percentage}%)")
+    
+    # Video description
+    with st.expander("🎥 **Video Description**", expanded=expanded):
+        st.markdown(video['description'])
+    
+    # Video metadata
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.markdown(f"**Tags:** {', '.join(video['tags'])}")
+    with col2:
+        if video['duration']:
+            st.markdown(f"**Duration:** {video['duration']} seconds")
+        else:
+            st.markdown("**Duration:** Not specified")
+    with col3:
+        st.markdown(f"**Characters:** {len(video['description'])}")
+
+
 def main():
     st.set_page_config(page_title="RAG Chat Interface", page_icon="💬", layout="wide")
 
     st.title("💬 RAG Chat Interface")
-    st.caption("🚀 Intelligent document search with AI-powered responses")
+    st.caption("🚀 Intelligent document and video search with AI-powered responses")
 
     # Check API status on app start or refresh
     if st.session_state.api_status == "unknown":
@@ -184,7 +298,7 @@ def main():
 
     # Sidebar for document upload
     with st.sidebar:
-        st.header("📁 Document Management")
+        st.header("📁 Content Management")
 
         # Display API status with more details
         st.subheader("📡 API Status")
@@ -208,23 +322,46 @@ def main():
         # Updated file uploader to support multiple document formats
         st.subheader("📤 Upload Documents")
         st.caption("Supported formats: TXT, PDF, DOCX, PPTX, HTML")
-        uploaded_file = st.file_uploader(
-            "Choose a file", 
+        uploaded_document = st.file_uploader(
+            "Choose a document", 
             type=["txt", "pdf", "docx", "pptx", "html"], 
-            key="file_uploader"
+            key="document_uploader"
         )
 
         if (
-            uploaded_file is not None
-            and st.session_state.uploaded_file != uploaded_file.name
+            uploaded_document is not None
+            and st.session_state.uploaded_file != uploaded_document.name
         ):
             with st.spinner("Processing document..."):
-                result = upload_document(uploaded_file)
+                result = upload_document(uploaded_document)
                 if result:
                     st.success(f"✅ {result['message']}")
-                    st.session_state.uploaded_file = uploaded_file.name
+                    st.session_state.uploaded_file = uploaded_document.name
                 else:
                     st.error("Failed to upload document")
+
+        st.divider()
+
+        # Video uploader
+        st.subheader("📹 Upload Videos")
+        st.caption("Supported formats: MP4, AVI, MOV, MKV, WMV, FLV, WEBM")
+        uploaded_video = st.file_uploader(
+            "Choose a video", 
+            type=["mp4", "avi", "mov", "mkv", "wmv", "flv", "webm"], 
+            key="video_uploader"
+        )
+
+        if (
+            uploaded_video is not None
+            and st.session_state.uploaded_file != uploaded_video.name
+        ):
+            with st.spinner("Processing video..."):
+                result = upload_video(uploaded_video)
+                if result:
+                    st.success(f"✅ {result['message']}")
+                    st.session_state.uploaded_file = uploaded_video.name
+                else:
+                    st.error("Failed to upload video")
 
         st.divider()
 
@@ -259,20 +396,25 @@ def main():
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             if message["role"] == "assistant":
-                # For assistant messages, display the response and documents separately
+                # For assistant messages, display the response and content separately
                 st.markdown("### 🤖 AI Response")
                 st.markdown(message["content"])
                 
                 # Display retrieved documents if available
-                if "results" in message and message["results"]:
+                if "documents" in message and message["documents"]:
                     st.markdown("---")
-                    display_document_results(message["results"])
+                    display_document_results(message["documents"])
+                
+                # Display retrieved videos if available
+                if "videos" in message and message["videos"]:
+                    st.markdown("---")
+                    display_video_results(message["videos"])
             else:
                 # For user messages, display normally
                 st.markdown(message["content"])
 
     # Chat input
-    if prompt := st.chat_input("Ask a question about your documents..."):
+    if prompt := st.chat_input("Ask a question about your documents or videos..."):
         # Add user message to chat history
         st.session_state.messages.append({"role": "user", "content": prompt})
 
@@ -283,25 +425,45 @@ def main():
         # Get response from API
         with st.chat_message("assistant"):
             with st.spinner("🧠 Thinking..."):
-                # Use the query_documents endpoint for both retrieval and response generation
-                response = query_documents(prompt)
+                # Query both documents and videos
+                document_response = query_documents(prompt)
+                video_response = query_videos(prompt)
 
-                if response:
+                # Combine results
+                response_text = ""
+                documents = []
+                videos = []
+                
+                if document_response:
+                    response_text = document_response["response"]
+                    documents = document_response["retrieved_documents"]
+                
+                if video_response:
+                    videos = video_response["results"]
+
+                if response_text or documents or videos:
                     # Display the generated response in a structured format
-                    st.markdown("### 🤖 AI Response")
-                    st.markdown(response["response"])
+                    if response_text:
+                        st.markdown("### 🤖 AI Response")
+                        st.markdown(response_text)
 
                     # Display retrieved documents in a structured format
-                    if response["retrieved_documents"]:
+                    if documents:
                         st.markdown("---")
-                        display_document_results(response["retrieved_documents"])
+                        display_document_results(documents)
+
+                    # Display retrieved videos in a structured format
+                    if videos:
+                        st.markdown("---")
+                        display_video_results(videos)
 
                     # Add assistant response to chat history
                     st.session_state.messages.append(
                         {
                             "role": "assistant",
-                            "content": response["response"],
-                            "results": response["retrieved_documents"],
+                            "content": response_text if response_text else "No specific response generated.",
+                            "documents": documents,
+                            "videos": videos,
                         }
                     )
                 else:
