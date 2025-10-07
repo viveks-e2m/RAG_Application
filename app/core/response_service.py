@@ -196,36 +196,25 @@ class ResponseService:
         Returns:
             str: Complete prompt for the model
         """
+        # Create the prompt
         prompt = f"""
-Answer the question comprehensively based only on the following context:
+                        You are answering a question based only on the following retrived documents:
 
-{context}
+                        {context}
 
-Question: {query}
+                        Question: {query}
 
-Instructions for providing a detailed response:
-1. Use ONLY the information from the provided context - do not make up information
-2. If the context doesn't contain enough information to fully answer, clearly state what is missing
-3. Provide a comprehensive and detailed answer with thorough explanation
-4. Structure your response with clear headings, subheadings, bullet points, and numbered lists where appropriate
-5. Include specific details, examples, direct quotes, and references from the context when relevant
-6. If relevant, mention the source documents and their relevance to your answer
-7. Aim for a response of at least 4-6 substantial paragraphs for complex questions
-8. Use a professional, educational, and helpful tone
-9. Organize information logically with proper flow between ideas
-10. Highlight key points and important concepts
-11. Address all aspects of the question thoroughly
-12. Conclude with a summary of the main points if appropriate
+                        Guidelines for your answer:
+                        - Use ONLY the information from the retrived documents provided. Do not add outside knowledge or make up details.  
+                        - If the retrived documents does not provide enough information to fully answer, clearly mention what is missing.  
+                        - Write in a natural, conversational, and helpful tone—avoid rigid sections or forced formatting.  
+                        - Provide a clear, detailed, and coherent response that flows naturally, as if you are explaining directly to someone.  
+                        - Highlight key details from the retrived documents when relevant, but weave them smoothly into your explanation.  
+                        - Aim for completeness: address all aspects of the question as much as the retrived documents allows.  
+                        - If specific retrived documents are particularly relevant, you may refer to them casually.  
 
-Format your response with:
-- A clear introduction that addresses the main question
-- Well-organized body paragraphs with supporting details
-- Bullet points or numbered lists for enumerating items or steps
-- Direct quotes from the context when they add value
-- A conclusion that summarizes key findings
-
-Answer:
-"""
+                        Answer:
+                        """
         return prompt
 
     def _create_transcript_prompt(self, query: str, context: str) -> str:
@@ -239,36 +228,25 @@ Answer:
         Returns:
             str: Complete prompt for the model
         """
+        # Create the prompt
         prompt = f"""
-Answer the question comprehensively based only on the following video transcript segments:
+                        You are answering a question based only on the following video transcript segments:
 
-{context}
+                        {context}
 
-Question: {query}
+                        Question: {query}
 
-Instructions for providing a detailed response:
-1. Use ONLY the information from the provided video transcript segments - do not make up information
-2. If the transcript segments don't contain enough information to fully answer, clearly state what is missing
-3. Provide a comprehensive and detailed answer with thorough explanation
-4. Structure your response with clear headings, subheadings, bullet points, and numbered lists where appropriate
-5. Include specific details, examples, direct quotes, and references from the transcript segments when relevant
-6. Mention which transcript segments were most relevant to your answer
-7. Aim for a response of at least 3-5 substantial paragraphs for complex questions
-8. Use a professional, educational, and helpful tone
-9. Organize information logically with proper flow between ideas
-10. Highlight key points and important concepts from the video content
-11. Address all aspects of the question thoroughly
-12. Conclude with a summary of the main points if appropriate
+                        Guidelines for your answer:
+                        - Use ONLY the information from the transcript segments provided. Do not add outside knowledge or make up details.  
+                        - If the transcript does not provide enough information to fully answer, clearly mention what is missing.  
+                        - Write in a natural, conversational, and helpful tone—avoid rigid sections or forced formatting.  
+                        - Provide a clear, detailed, and coherent response that flows naturally, as if you are explaining directly to someone.  
+                        - Highlight key details from the transcript when relevant, but weave them smoothly into your explanation.  
+                        - Aim for completeness: address all aspects of the question as much as the transcript allows.  
+                        - If specific transcript segments are particularly relevant, you may refer to them casually (e.g., "In one part of the video, it was mentioned that...").  
 
-Format your response with:
-- A clear introduction that addresses the main question
-- Well-organized body paragraphs with supporting details from the video
-- Bullet points or numbered lists for enumerating items or steps
-- Direct quotes from the transcript when they add value
-- A conclusion that summarizes key findings
-
-Answer:
-"""
+                        Answer:
+                        """
         return prompt
 
     def _create_fallback_response(

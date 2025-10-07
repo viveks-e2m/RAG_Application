@@ -5,6 +5,7 @@ from typing import List, Dict, Optional, Any
 import time
 import os
 import logging
+from openai import OpenAI
 
 # Configuration - Handle both Docker and local environments
 # Use environment variable to determine if running in Docker
@@ -69,7 +70,7 @@ def upload_document(file) -> Optional[Dict[str, Any]]:
             content_type = "text/html"
         else:
             content_type = "text/plain"
-        
+
         files = {"file": (file.name, file, content_type)}
         response = requests.post(
             f"{API_BASE_URL}/upload-document/", files=files, timeout=600
@@ -111,7 +112,7 @@ def upload_video(file) -> Optional[Dict[str, Any]]:
             content_type = "video/x-matroska"
         else:
             content_type = "video/unknown"
-        
+
         files = {"file": (file.name, file, content_type)}
         response = requests.post(
             f"{API_BASE_URL}/upload-video/", files=files, timeout=600
@@ -189,97 +190,6 @@ def query_video_transcripts(query: str, top_k: int = 5) -> Optional[Dict[str, An
         return None
 
 
-def generate_response_from_transcripts(query: str, transcripts: List[Dict[str, Any]]) -> str:
-    """Generate a response based on video transcripts using OpenAI"""
-    try:
-        # Check if we have the OpenAI API key
-        api_key = os.getenv("OPENAI_API_KEY", "")
-        if not api_key:
-            return "OpenAI API key not configured. Cannot generate response from transcripts."
-        
-        from openai import OpenAI
-        client = OpenAI(api_key=api_key)
-        
-        # Format the context from transcripts
-        context_parts = []
-        for i, transcript in enumerate(transcripts, 1):
-            content = transcript.get("description", "")
-            score = transcript.get("score", 0)
-            context_parts.append(
-                f"Video Transcript Segment {i} (Relevance: {score:.2f}):\n{content}"
-            )
-        
-        context = "\n\n".join(context_parts)
-        
-        # Create the prompt
-        prompt = f"""
-Answer the question comprehensively based only on the following video transcript segments:
-
-{context}
-
-Question: {query}
-
-Instructions for providing a detailed response:
-1. Use ONLY the information from the provided video transcript segments - do not make up information
-2. If the transcript segments don't contain enough information to fully answer, clearly state what is missing
-3. Provide a comprehensive and detailed answer with thorough explanation
-4. Structure your response with clear headings, subheadings, bullet points, and numbered lists where appropriate
-5. Include specific details, examples, and direct quotes from the transcript segments when relevant
-6. Mention which transcript segments were most relevant to your answer
-7. Aim for a response of at least 3-5 substantial paragraphs for complex questions
-8. Use a professional, educational, and helpful tone
-9. Organize information logically with proper flow between ideas
-10. Highlight key points and important concepts from the video content
-11. Address all aspects of the question thoroughly
-12. Conclude with a summary of the main points if appropriate
-
-Format your response with:
-- A clear introduction that addresses the main question
-- Well-organized body paragraphs with supporting details from the video
-- Bullet points or numbered lists for enumerating items or steps
-- Direct quotes from the transcript when they add value
-- A conclusion that summarizes key findings
-
-Answer:
-"""
-        
-        # Generate response using OpenAI
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are an expert research assistant that provides comprehensive, detailed, and well-structured answers based on video transcript content. Your responses should be thorough, informative, and educational. Always prioritize accuracy and clarity. Structure your responses with clear headings, subheadings, bullet points, and numbered lists where appropriate. Include specific examples, quotes, and references from the provided video transcript segments. Aim for responses that are 3-5 paragraphs long for complex questions, ensuring you fully address all aspects of the query.",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.7,
-            max_tokens=1500,
-        )
-        
-        generated_response = response.choices[0].message.content
-        if generated_response:
-            return generated_response.strip()
-        else:
-            return "I couldn't generate a response based on the provided video transcript segments."
-            
-    except Exception as e:
-        logger = logging.getLogger(__name__)
-        logger.error(f"Error generating response from transcripts: {e}")
-        # Fallback response
-        if transcripts:
-            response = "Here's what I found in the video transcripts:\n\n"
-            for i, transcript in enumerate(transcripts, 1):
-                content = transcript.get("description", "")
-                score = transcript.get("score", 0)
-                response += f"Video Transcript Segment {i} (Relevance Score: {score:.4f}):\n"
-                response += f"Content: {content}\n\n"
-            response += "Please note: This is a fallback response. The AI-generated response would provide a more structured and detailed answer based on this information."
-            return response
-        else:
-            return "I couldn't find any relevant video transcript segments to answer your question."
-
-
 def format_document_preview(content: str, max_length: int = 300) -> str:
     """Format document content for preview display"""
     if len(content) <= max_length:
@@ -290,71 +200,82 @@ def format_document_preview(content: str, max_length: int = 300) -> str:
 def display_document_results(documents: List[Dict[str, Any]], expanded: bool = False):
     """Display document results in a structured format"""
     st.markdown("### 📚 Retrieved Documents")
-    
+
     # Show summary statistics
-    st.markdown(f"**Found {len(documents)} relevant document{'s' if len(documents) != 1 else ''}**")
-    
+    st.markdown(
+        f"**Found {len(documents)} relevant document{'s' if len(documents) != 1 else ''}**"
+    )
+
     # Create tabs for better organization if there are multiple documents
     if len(documents) > 1:
         tabs = st.tabs([f"Document {i+1}" for i in range(len(documents))])
         for i, (tab, doc) in enumerate(zip(tabs, documents)):
             with tab:
-                display_single_document(doc, i+1, expanded)
+                display_single_document(doc, i + 1, expanded)
     else:
         # Single document view
         for i, doc in enumerate(documents):
-            display_single_document(doc, i+1, expanded)
+            display_single_document(doc, i + 1, expanded)
 
 
 def display_video_results(videos: List[Dict[str, Any]], expanded: bool = False):
     """Display video results in a structured format"""
     st.markdown("### 🎥 Retrieved Videos")
-    
+
     # Show summary statistics
-    st.markdown(f"**Found {len(videos)} relevant video{'s' if len(videos) != 1 else ''}**")
-    
+    st.markdown(
+        f"**Found {len(videos)} relevant video{'s' if len(videos) != 1 else ''}**"
+    )
+
     # Create tabs for better organization if there are multiple videos
     if len(videos) > 1:
         tabs = st.tabs([f"Video {i+1}" for i in range(len(videos))])
         for i, (tab, video) in enumerate(zip(tabs, videos)):
             with tab:
-                display_single_video(video, i+1, expanded)
+                display_single_video(video, i + 1, expanded)
     else:
         # Single video view
         for i, video in enumerate(videos):
-            display_single_video(video, i+1, expanded)
+            display_single_video(video, i + 1, expanded)
 
 
-def display_video_transcript_results(video_transcripts: List[Dict[str, Any]], expanded: bool = False):
+def display_video_transcript_results(
+    video_transcripts: List[Dict[str, Any]], expanded: bool = False
+):
     """Display video transcript results in a structured format"""
     st.markdown("### 🎬 Retrieved Video Transcripts")
-    
+
     # Show summary statistics
-    st.markdown(f"**Found {len(video_transcripts)} relevant transcript segment{'s' if len(video_transcripts) != 1 else ''}**")
-    
+    st.markdown(
+        f"**Found {len(video_transcripts)} relevant transcript segment{'s' if len(video_transcripts) != 1 else ''}**"
+    )
+
     # Create tabs for better organization if there are multiple transcript segments
     if len(video_transcripts) > 1:
         tabs = st.tabs([f"Segment {i+1}" for i in range(len(video_transcripts))])
         for i, (tab, transcript) in enumerate(zip(tabs, video_transcripts)):
             with tab:
-                display_single_video_transcript(transcript, i+1, expanded)
+                display_single_video_transcript(transcript, i + 1, expanded)
     else:
         # Single transcript view
         for i, transcript in enumerate(video_transcripts):
-            display_single_video_transcript(transcript, i+1, expanded)
+            display_single_video_transcript(transcript, i + 1, expanded)
 
 
 def display_single_document(doc: Dict[str, Any], index: int, expanded: bool = False):
     """Display a single document in a structured format"""
     # Document header with score
-    score_percentage = min(100, max(0, int(doc['score'] * 100)))
+    score_percentage = min(100, max(0, int(doc["score"] * 100)))
     st.markdown(f"**📄 Document:** `{doc['document_name']}`")
-    st.progress(score_percentage/100, text=f"Relevance Score: {doc['score']:.4f} ({score_percentage}%)")
-    
+    st.progress(
+        score_percentage / 100,
+        text=f"Relevance Score: {doc['score']:.4f} ({score_percentage}%)",
+    )
+
     # Document content
     with st.expander("📄 **Document Content**", expanded=expanded):
         # Format content for better readability
-        content = doc['text']
+        content = doc["text"]
         if len(content) > 500:
             # For longer content, show a preview with option to expand
             st.markdown("**Preview:**")
@@ -364,7 +285,7 @@ def display_single_document(doc: Dict[str, Any], index: int, expanded: bool = Fa
             st.markdown(content)
         else:
             st.markdown(content)
-    
+
     # Document metadata
     col1, col2 = st.columns(2)
     with col1:
@@ -376,20 +297,23 @@ def display_single_document(doc: Dict[str, Any], index: int, expanded: bool = Fa
 def display_single_video(video: Dict[str, Any], index: int, expanded: bool = False):
     """Display a single video in a structured format"""
     # Video header with score
-    score_percentage = min(100, max(0, int(video['score'] * 100)))
+    score_percentage = min(100, max(0, int(video["score"] * 100)))
     # st.markdown(f"**🎥 Video:** `{video['video_file_name']}`")
-    st.progress(score_percentage/100, text=f"Relevance Score: {video['score']:.4f} ({score_percentage}%)")
-    
+    st.progress(
+        score_percentage / 100,
+        text=f"Relevance Score: {video['score']:.4f} ({score_percentage}%)",
+    )
+
     # Video description
     with st.expander("🎥 **Video Description**", expanded=expanded):
-        st.markdown(video['description'])
-    
+        st.markdown(video["description"])
+
     # Video metadata
     col1, col2, col3 = st.columns(3)
     with col1:
         st.markdown(f"**Tags:** {', '.join(video['tags'])}")
     with col2:
-        if video['duration']:
+        if video["duration"]:
             st.markdown(f"**Duration:** {video['duration']} seconds")
         else:
             st.markdown("**Duration:** Not specified")
@@ -397,23 +321,32 @@ def display_single_video(video: Dict[str, Any], index: int, expanded: bool = Fal
         st.markdown(f"**Characters:** {len(video['description'])}")
 
 
-def display_single_video_transcript(transcript: Dict[str, Any], index: int, expanded: bool = False):
+def display_single_video_transcript(
+    transcript: Dict[str, Any], index: int, expanded: bool = False
+):
     """Display a single video transcript segment in a structured format"""
     # Transcript header with score
-    score_percentage = min(100, max(0, int(transcript['score'] * 100)))
-    st.markdown(f"**🎬 Transcript Segment:** `{transcript.get('document_name', 'Video Transcript Segment')}`")
-    st.progress(score_percentage/100, text=f"Relevance Score: {transcript['score']:.4f} ({score_percentage}%)")
-    
+    score_percentage = min(100, max(0, int(transcript["score"] * 100)))
+    st.markdown(
+        f"**🎬 Transcript Segment:** `{transcript.get('document_name', 'Video Transcript Segment')}`"
+    )
+    st.progress(
+        score_percentage / 100,
+        text=f"Relevance Score: {transcript['score']:.4f} ({score_percentage}%)",
+    )
+
     # Transcript content
     with st.expander("🎬 **Transcript Content**", expanded=expanded):
-        st.markdown(transcript['text'])  # Changed from 'description' to 'text'
-    
+        st.markdown(transcript["text"])  # Changed from 'description' to 'text'
+
     # Transcript metadata
     col1, col2 = st.columns(2)
     with col1:
         st.markdown(f"**Chunk Index:** {transcript.get('chunk_index', 'N/A')}")
     with col2:
-        st.markdown(f"**Characters:** {len(transcript['text'])}")  # Changed from 'description' to 'text'
+        st.markdown(
+            f"**Characters:** {len(transcript['text'])}"
+        )  # Changed from 'description' to 'text'
 
 
 def main():
@@ -453,9 +386,9 @@ def main():
         st.subheader("📤 Upload Documents")
         st.caption("Supported formats: TXT, PDF, DOCX, PPTX, HTML")
         uploaded_document = st.file_uploader(
-            "Choose a document", 
-            type=["txt", "pdf", "docx", "pptx", "html"], 
-            key="document_uploader"
+            "Choose a document",
+            type=["txt", "pdf", "docx", "pptx", "html"],
+            key="document_uploader",
         )
 
         if (
@@ -476,9 +409,9 @@ def main():
         st.subheader("📹 Upload Videos")
         st.caption("Supported formats: MP4, AVI, MOV, MKV, WMV, FLV, WEBM")
         uploaded_video = st.file_uploader(
-            "Choose a video", 
-            type=["mp4", "avi", "mov", "mkv", "wmv", "flv", "webm"], 
-            key="video_uploader"
+            "Choose a video",
+            type=["mp4", "avi", "mov", "mkv", "wmv", "flv", "webm"],
+            key="video_uploader",
         )
 
         if (
@@ -529,17 +462,17 @@ def main():
                 # For assistant messages, display the response and content separately
                 st.markdown("### 🤖 AI Response")
                 st.markdown(message["content"])
-                
+
                 # Display retrieved documents if available
                 if "documents" in message and message["documents"]:
                     st.markdown("---")
                     display_document_results(message["documents"])
-                
+
                 # Display retrieved videos if available
                 if "videos" in message and message["videos"]:
                     st.markdown("---")
                     display_video_results(message["videos"])
-                    
+
                 # Display retrieved video transcripts if available
                 if "video_transcripts" in message and message["video_transcripts"]:
                     st.markdown("---")
@@ -570,14 +503,14 @@ def main():
                 documents = []
                 # videos = []  # Removed since we're not using the query-videos endpoint
                 video_transcripts = []
-                            
+
                 if document_response:
                     response_text = document_response["response"]
                     documents = document_response["retrieved_documents"]
-                            
+
                 # if video_response:  # Removed since we're not using the query-videos endpoint
                 #     videos = video_response["results"]
-                                
+
                 if video_transcript_response:
                     # For video transcripts, we now get a generated response
                     response_text = video_transcript_response["response"]
@@ -598,7 +531,7 @@ def main():
                     # if videos:  # Removed since we're not using the query-videos endpoint
                     #     st.markdown("---")
                     #     display_video_results(videos)
-                        
+
                     # Display retrieved video transcripts in a structured format
                     if video_transcripts:
                         st.markdown("---")
@@ -608,7 +541,11 @@ def main():
                     st.session_state.messages.append(
                         {
                             "role": "assistant",
-                            "content": response_text if response_text else "No specific response generated.",
+                            "content": (
+                                response_text
+                                if response_text
+                                else "No specific response generated."
+                            ),
                             "documents": documents,
                             # "videos": videos,  # Removed since we're not using the query-videos endpoint
                             "video_transcripts": video_transcripts,
