@@ -3,7 +3,7 @@ import json
 import subprocess
 import tempfile
 import logging
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 import whisper
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
@@ -13,6 +13,28 @@ logger = logging.getLogger(__name__)
 
 
 class VideoRAGSystemQdrant:
+    # Class variable to hold the shared Whisper model
+    _shared_whisper_model = None
+    
+    @classmethod
+    def initialize_whisper_model(cls, model_size="medium"):
+        """Initialize the shared Whisper model at application startup"""
+        if cls._shared_whisper_model is None:
+            logger.info(f"Loading Whisper {model_size} model...")
+            cls._shared_whisper_model = whisper.load_model(model_size)
+            logger.info("Whisper model loaded successfully")
+        return cls._shared_whisper_model
+    
+    @classmethod
+    def get_whisper_model(cls):
+        """Get the shared Whisper model"""
+        return cls._shared_whisper_model
+    
+    @classmethod
+    def release_whisper_model(cls):
+        """Release the shared Whisper model"""
+        cls._shared_whisper_model = None
+
     def __init__(
         self,
         model_size="medium",
@@ -30,9 +52,14 @@ class VideoRAGSystemQdrant:
             qdrant_host (str): Host for Qdrant service
             qdrant_port (int): Port for Qdrant service
         """
-        logger.info(f"Loading Whisper {model_size} model...")
-        # Load the whisper model
-        self.whisper_model = whisper.load_model(model_size)
+        # Use the shared Whisper model if available, otherwise load it
+        self.whisper_model = VideoRAGSystemQdrant.get_whisper_model()
+        if self.whisper_model is None:
+            logger.info(f"Loading Whisper {model_size} model...")
+            self.whisper_model = whisper.load_model(model_size)
+            # Set it as shared model for future instances
+            if VideoRAGSystemQdrant.get_whisper_model() is None:
+                VideoRAGSystemQdrant._shared_whisper_model = self.whisper_model
 
         # Use existing embedding service
         self.embedding_service = EmbeddingService()
@@ -393,18 +420,20 @@ class VideoRAGSystemQdrant:
         Returns:
             List[Dict]: Top matching segments with timestamps
         """
-        if not self.transcript_segments:
-            raise Exception("No video processed yet. Call process_video() first.")
-
         # Create embedding for query using existing embedding service
         query_embedding = self.embedding_service.encode_text([query])[0]
 
         # Search in Qdrant
-        search_result = self.qdrant_client.search(
-            collection_name=self.collection_name,
-            query_vector=query_embedding,
-            limit=top_k,
-        )
+        try:
+            search_result = self.qdrant_client.search(
+                collection_name=self.collection_name,
+                query_vector=query_embedding,
+                limit=top_k,
+            )
+        except Exception as e:
+            logger.error(f"Error searching in Qdrant: {e}")
+            # Return empty list if search fails
+            return []
 
         # Prepare results
         results = []

@@ -4,6 +4,7 @@ import json
 from typing import List, Dict, Optional, Any
 import time
 import os
+import logging
 
 # Configuration - Handle both Docker and local environments
 # Use environment variable to determine if running in Docker
@@ -130,7 +131,7 @@ def upload_video(file) -> Optional[Dict[str, Any]]:
         return None
 
 
-def query_documents(query: str, top_k: int = 10) -> Optional[Dict[str, Any]]:
+def query_documents(query: str, top_k: int = 5) -> Optional[Dict[str, Any]]:
     """Query documents in the RAG system and generate response"""
     if st.session_state.api_status != "connected":
         if not check_api_status():
@@ -159,37 +160,8 @@ def query_documents(query: str, top_k: int = 10) -> Optional[Dict[str, Any]]:
         return None
 
 
-def query_videos(query: str, top_k: int = 10) -> Optional[Dict[str, Any]]:
-    """Query videos in the RAG system"""
-    if st.session_state.api_status != "connected":
-        if not check_api_status():
-            st.error(
-                "API is not accessible. Please make sure the FastAPI server is running."
-            )
-            return None
-
-    try:
-        payload = {"query": query, "top_k": top_k}
-        response = requests.post(
-            f"{API_BASE_URL}/query-videos/", json=payload, timeout=600
-        )
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.ConnectionError:
-        st.error(
-            "Cannot connect to the API. Please make sure the FastAPI server is running."
-        )
-        return None
-    except requests.exceptions.Timeout:
-        st.error("API request timed out. Please try again.")
-        return None
-    except requests.exceptions.RequestException as e:
-        st.error(f"Error querying videos: {str(e)}")
-        return None
-
-
-def query_video_transcripts(query: str, top_k: int = 10) -> Optional[Dict[str, Any]]:
-    """Query video transcripts in the RAG system"""
+def query_video_transcripts(query: str, top_k: int = 5) -> Optional[Dict[str, Any]]:
+    """Query video transcripts in the RAG system and generate response"""
     if st.session_state.api_status != "connected":
         if not check_api_status():
             st.error(
@@ -215,6 +187,97 @@ def query_video_transcripts(query: str, top_k: int = 10) -> Optional[Dict[str, A
     except requests.exceptions.RequestException as e:
         st.error(f"Error querying video transcripts: {str(e)}")
         return None
+
+
+def generate_response_from_transcripts(query: str, transcripts: List[Dict[str, Any]]) -> str:
+    """Generate a response based on video transcripts using OpenAI"""
+    try:
+        # Check if we have the OpenAI API key
+        api_key = os.getenv("OPENAI_API_KEY", "")
+        if not api_key:
+            return "OpenAI API key not configured. Cannot generate response from transcripts."
+        
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key)
+        
+        # Format the context from transcripts
+        context_parts = []
+        for i, transcript in enumerate(transcripts, 1):
+            content = transcript.get("description", "")
+            score = transcript.get("score", 0)
+            context_parts.append(
+                f"Video Transcript Segment {i} (Relevance: {score:.2f}):\n{content}"
+            )
+        
+        context = "\n\n".join(context_parts)
+        
+        # Create the prompt
+        prompt = f"""
+Answer the question comprehensively based only on the following video transcript segments:
+
+{context}
+
+Question: {query}
+
+Instructions for providing a detailed response:
+1. Use ONLY the information from the provided video transcript segments - do not make up information
+2. If the transcript segments don't contain enough information to fully answer, clearly state what is missing
+3. Provide a comprehensive and detailed answer with thorough explanation
+4. Structure your response with clear headings, subheadings, bullet points, and numbered lists where appropriate
+5. Include specific details, examples, and direct quotes from the transcript segments when relevant
+6. Mention which transcript segments were most relevant to your answer
+7. Aim for a response of at least 3-5 substantial paragraphs for complex questions
+8. Use a professional, educational, and helpful tone
+9. Organize information logically with proper flow between ideas
+10. Highlight key points and important concepts from the video content
+11. Address all aspects of the question thoroughly
+12. Conclude with a summary of the main points if appropriate
+
+Format your response with:
+- A clear introduction that addresses the main question
+- Well-organized body paragraphs with supporting details from the video
+- Bullet points or numbered lists for enumerating items or steps
+- Direct quotes from the transcript when they add value
+- A conclusion that summarizes key findings
+
+Answer:
+"""
+        
+        # Generate response using OpenAI
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are an expert research assistant that provides comprehensive, detailed, and well-structured answers based on video transcript content. Your responses should be thorough, informative, and educational. Always prioritize accuracy and clarity. Structure your responses with clear headings, subheadings, bullet points, and numbered lists where appropriate. Include specific examples, quotes, and references from the provided video transcript segments. Aim for responses that are 3-5 paragraphs long for complex questions, ensuring you fully address all aspects of the query.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.7,
+            max_tokens=1500,
+        )
+        
+        generated_response = response.choices[0].message.content
+        if generated_response:
+            return generated_response.strip()
+        else:
+            return "I couldn't generate a response based on the provided video transcript segments."
+            
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error generating response from transcripts: {e}")
+        # Fallback response
+        if transcripts:
+            response = "Here's what I found in the video transcripts:\n\n"
+            for i, transcript in enumerate(transcripts, 1):
+                content = transcript.get("description", "")
+                score = transcript.get("score", 0)
+                response += f"Video Transcript Segment {i} (Relevance Score: {score:.4f}):\n"
+                response += f"Content: {content}\n\n"
+            response += "Please note: This is a fallback response. The AI-generated response would provide a more structured and detailed answer based on this information."
+            return response
+        else:
+            return "I couldn't find any relevant video transcript segments to answer your question."
 
 
 def format_document_preview(content: str, max_length: int = 300) -> str:
@@ -314,7 +377,7 @@ def display_single_video(video: Dict[str, Any], index: int, expanded: bool = Fal
     """Display a single video in a structured format"""
     # Video header with score
     score_percentage = min(100, max(0, int(video['score'] * 100)))
-    st.markdown(f"**🎥 Video:** `{video['video_file_name']}`")
+    # st.markdown(f"**🎥 Video:** `{video['video_file_name']}`")
     st.progress(score_percentage/100, text=f"Relevance Score: {video['score']:.4f} ({score_percentage}%)")
     
     # Video description
@@ -338,25 +401,19 @@ def display_single_video_transcript(transcript: Dict[str, Any], index: int, expa
     """Display a single video transcript segment in a structured format"""
     # Transcript header with score
     score_percentage = min(100, max(0, int(transcript['score'] * 100)))
-    st.markdown(f"**🎬 Transcript Segment:** `{transcript['video_file_name']}`")
+    st.markdown(f"**🎬 Transcript Segment:** `{transcript.get('document_name', 'Video Transcript Segment')}`")
     st.progress(score_percentage/100, text=f"Relevance Score: {transcript['score']:.4f} ({score_percentage}%)")
     
     # Transcript content
     with st.expander("🎬 **Transcript Content**", expanded=expanded):
-        st.markdown(transcript['description'])
+        st.markdown(transcript['text'])  # Changed from 'description' to 'text'
     
     # Transcript metadata
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     with col1:
-        st.markdown(f"**Tags:** {', '.join(transcript['tags'])}")
+        st.markdown(f"**Chunk Index:** {transcript.get('chunk_index', 'N/A')}")
     with col2:
-        if transcript['duration']:
-            # For transcripts, duration represents the average timestamp
-            st.markdown(f"**Timestamp:** ~{transcript['duration']:.2f}s")
-        else:
-            st.markdown("**Timestamp:** Not specified")
-    with col3:
-        st.markdown(f"**Characters:** {len(transcript['description'])}")
+        st.markdown(f"**Characters:** {len(transcript['text'])}")  # Changed from 'description' to 'text'
 
 
 def main():
@@ -505,26 +562,28 @@ def main():
             with st.spinner("🧠 Thinking..."):
                 # Query both documents and videos
                 document_response = query_documents(prompt)
-                video_response = query_videos(prompt)
+                # video_response = query_videos(prompt)  # Removed since we're not using the query-videos endpoint
                 video_transcript_response = query_video_transcripts(prompt)
 
                 # Combine results
                 response_text = ""
                 documents = []
-                videos = []
+                # videos = []  # Removed since we're not using the query-videos endpoint
                 video_transcripts = []
-                
+                            
                 if document_response:
                     response_text = document_response["response"]
                     documents = document_response["retrieved_documents"]
-                
-                if video_response:
-                    videos = video_response["results"]
-                    
+                            
+                # if video_response:  # Removed since we're not using the query-videos endpoint
+                #     videos = video_response["results"]
+                                
                 if video_transcript_response:
-                    video_transcripts = video_transcript_response["results"]
+                    # For video transcripts, we now get a generated response
+                    response_text = video_transcript_response["response"]
+                    video_transcripts = video_transcript_response["retrieved_documents"]
 
-                if response_text or documents or videos or video_transcripts:
+                if response_text or documents or video_transcripts:
                     # Display the generated response in a structured format
                     if response_text:
                         st.markdown("### 🤖 AI Response")
@@ -536,9 +595,9 @@ def main():
                         display_document_results(documents)
 
                     # Display retrieved videos in a structured format
-                    if videos:
-                        st.markdown("---")
-                        display_video_results(videos)
+                    # if videos:  # Removed since we're not using the query-videos endpoint
+                    #     st.markdown("---")
+                    #     display_video_results(videos)
                         
                     # Display retrieved video transcripts in a structured format
                     if video_transcripts:
@@ -551,7 +610,7 @@ def main():
                             "role": "assistant",
                             "content": response_text if response_text else "No specific response generated.",
                             "documents": documents,
-                            "videos": videos,
+                            # "videos": videos,  # Removed since we're not using the query-videos endpoint
                             "video_transcripts": video_transcripts,
                         }
                     )

@@ -15,8 +15,6 @@ from app.schemas.video import (
     VideoUploadRequest,
     VideoEmbeddingResponse,
     VideoQueryRequest,
-    VideoQueryResponse,
-    VideoSearchResult,
 )
 from app.core.qdrant_client_service import QdrantService
 from app.core.embedding_service import EmbeddingService
@@ -33,6 +31,7 @@ qdrant_service = QdrantService()
 embedding_service = EmbeddingService()
 response_service = ResponseService()
 video_embedding_service = VideoEmbeddingService()
+video_rag_system = None  # Will be initialized at startup
 
 
 @router.on_event("startup")
@@ -43,10 +42,28 @@ async def startup_event():
         embedding_service.initialize_model()
         response_service.initialize_client()
         video_embedding_service.initialize_model()
+        
+        # Initialize the shared Whisper model
+        global video_rag_system
+        from app.core.video_rag_system import VideoRAGSystemQdrant
+        VideoRAGSystemQdrant.initialize_whisper_model("small")
+        
         logger.info("Services initialized successfully")
     except Exception as e:
         logger.error(f"Error initializing services: {e}")
         raise
+
+
+@router.on_event("shutdown")
+async def shutdown_event():
+    """Release resources on shutdown"""
+    try:
+        # Release the shared Whisper model
+        from app.core.video_rag_system import VideoRAGSystemQdrant
+        VideoRAGSystemQdrant.release_whisper_model()
+        logger.info("Resources released successfully")
+    except Exception as e:
+        logger.error(f"Error releasing resources: {e}")
 
 
 @router.post("/upload-document/", response_model=DocumentUploadResponse)
@@ -172,12 +189,16 @@ async def upload_video(file: UploadFile = File(...)):
 
         try:
             # Process video using VideoRAGSystemQdrant for full processing
+            # Use the correct Qdrant host based on environment
+            from app.core.config import settings
+            qdrant_host = "qdrant" if settings.IS_DOCKER else settings.QDRANT_HOST
+            
             video_rag_system = VideoRAGSystemQdrant(
                 model_size="small",
                 chunk_size=45,
                 chunk_overlap=15,
-                qdrant_host="qdrant",
-                qdrant_port=6333,
+                qdrant_host=qdrant_host,
+                qdrant_port=settings.QDRANT_PORT,
             )
 
             # Process the video
@@ -285,64 +306,9 @@ async def process_video_metadata(request: VideoUploadRequest):
             detail="Internal server error while processing video metadata",
         )
 
-
-@router.post("/query-videos/", response_model=VideoQueryResponse)
-async def query_videos(request: VideoQueryRequest):
-    """Query stored video metadata using semantic search"""
-    query_text = request.query.strip()
-
-    if not query_text:
-        raise HTTPException(status_code=400, detail="Query cannot be empty")
-
-    try:
-        # Generate embedding for the query
-        query_embedding = video_embedding_service.encode_video_descriptions(
-            [query_text]
-        )[0]
-
-        # Search in Qdrant - we'll need to filter for video content type
-        # For now, we'll search all and filter results
-        search_result = qdrant_service.search_points(
-            query_vector=query_embedding, limit=request.top_k or 5
-        )
-
-        # Filter results to only include videos
-        video_results = [
-            result
-            for result in search_result
-            if result.payload.get("content_type") == "video"
-        ]
-
-        # Take only the requested number of results
-        video_results = video_results[: request.top_k or 5]
-
-        # Format results
-        results = []
-        for result in video_results:
-            results.append(
-                VideoSearchResult(
-                    video_file_name=result.payload.get("video_file_name", ""),
-                    description=result.payload.get("description", ""),
-                    duration=result.payload.get("duration"),
-                    tags=result.payload.get("tags", []),
-                    score=result.score,
-                )
-            )
-
-        return VideoQueryResponse(query=query_text, results=results)
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error processing video query: {e}")
-        raise HTTPException(
-            status_code=500, detail="Internal server error while processing video query"
-        )
-
-
-@router.post("/query-video-transcripts/", response_model=VideoQueryResponse)
+@router.post("/query-video-transcripts/", response_model=GenerateResponse)
 async def query_video_transcripts(request: VideoQueryRequest):
-    """Query stored video transcript segments using semantic search"""
+    """Query stored video transcript segments using semantic search and generate response"""
     query_text = request.query.strip()
 
     if not query_text:
@@ -350,35 +316,43 @@ async def query_video_transcripts(request: VideoQueryRequest):
 
     try:
         # Create a temporary VideoRAGSystemQdrant instance to perform the search
-        # We'll use the same collection name and Qdrant configuration
+        # We need to use the correct Qdrant host based on the environment
+        from app.core.config import settings
+        
+        # Use the appropriate Qdrant host based on environment
+        qdrant_host = "qdrant" if settings.IS_DOCKER else settings.QDRANT_HOST
+        
         video_rag_system = VideoRAGSystemQdrant(
             model_size="small",
             chunk_size=45,
             chunk_overlap=15,
-            qdrant_host="qdrant",
-            qdrant_port=6333,
+            qdrant_host=qdrant_host,
+            qdrant_port=settings.QDRANT_PORT,
         )
 
         # Perform search on transcript segments
         search_results = video_rag_system.search(query_text, request.top_k or 5)
 
-        # Format results similar to video metadata results for consistency
+        # Format results similar to document results for consistency
         results = []
         for result in search_results:
-            # Create a mock video result with transcript information
-            # For duration, we'll use the average of start and end times
-            avg_duration = (result["start_time"] + result["end_time"]) / 2
             results.append(
-                VideoSearchResult(
-                    video_file_name="Video Transcript Segment",
-                    description=result["text"],
-                    duration=avg_duration,
-                    tags=["transcript", "segment"],
-                    score=result["similarity"],
-                )
+                {
+                    "document_name": "Video Transcript Segment",
+                    "chunk_index": 0,
+                    "text": result["text"],
+                    "score": result["similarity"],
+                }
             )
 
-        return VideoQueryResponse(query=query_text, results=results)
+        # Generate response using OpenAI
+        generated_response = response_service.generate_response_from_transcripts(
+            query=query_text, retrieved_transcripts=results
+        )
+
+        return GenerateResponse(
+            query=query_text, response=generated_response, retrieved_documents=results
+        )
 
     except HTTPException:
         raise
